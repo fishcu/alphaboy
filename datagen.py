@@ -29,17 +29,18 @@ class GoDataGenerator:
             while len(input_data) < batch_size:
                 sgf_file = self.sgf_files[random.randint(
                     0, len(self.sgf_files) - 1)]
+                # print(f"Loading SGF from: {os.path.abspath(sgf_file)}")
 
                 board, moves, result = go_data_gen.load_sgf(sgf_file)
 
-                play_idx = random.randint(0, len(moves) - 1)
+                play_idx = random.randint(0, len(moves) - 2)
                 next_play_idx = play_idx + 1
 
                 for move in moves[:next_play_idx]:
                     board.play(move)
 
                 if self.debug:
-                    print(f"SGF loaded from: {sgf_file}")
+
                     print(f"Showing board with {next_play_idx} moves played:")
                     board.print()
 
@@ -100,11 +101,11 @@ class GoDataGenerator:
 
 
 # Usage example
-data_dir = "./data/"
-generator = GoDataGenerator(data_dir, debug=True)
+# data_dir = "./data/"
+# generator = GoDataGenerator(data_dir, debug=False)
 
-batch_size = 32
-input_batch, policy_batch, value_batch = generator.generate_batch(batch_size)
-print("Input batch shape:", input_batch.shape)
-print("Policy batch shape:", policy_batch.shape)
-print("Value batch shape:", value_batch.shape)
+# batch_size = 2**10
+# input_batch, policy_batch, value_batch = generator.generate_batch(batch_size)
+# print("Input batch shape:", input_batch.shape)
+# print("Policy batch shape:", policy_batch.shape)
+# print("Value batch shape:", value_batch.shape)
