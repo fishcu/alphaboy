@@ -21,6 +21,9 @@ def train_loop(dataloader, model, loss_fn, optimizer, device):
         outputs_flat = outputs.view(outputs.size(0), -1)
         labels_flat = labels.view(labels.size(0), -1)
 
+        # print(outputs_flat.shape)
+        # print(labels_flat.shape)
+
         # Compute loss
         loss = loss_fn(outputs_flat, labels_flat)
 
@@ -57,7 +60,7 @@ class GoNet(nn.Module):
         ]
 
         # Hidden layers
-        for _ in range(depth - 2):
+        for _ in range(depth - 1):
             layers.extend([
                 nn.Conv2d(width, width, kernel_size=3, stride=1, padding=1),
                 nn.BatchNorm2d(width),
@@ -65,7 +68,7 @@ class GoNet(nn.Module):
             ])
 
         # Output layer
-        layers.append(nn.Conv2d(width, 1, kernel_size=3, stride=1, padding=1))
+        layers.append(nn.Conv2d(width, 1, kernel_size=1, stride=1, padding=0))
 
         self.network = nn.Sequential(*layers)
 
@@ -76,10 +79,21 @@ class GoNet(nn.Module):
         return policy
 
 
+def count_parameters(model):
+    total_params = 0
+    trainable_params = 0
+    for param in model.parameters():
+        num_params = param.numel()
+        total_params += num_params
+        if param.requires_grad:
+            trainable_params += num_params
+    return total_params, trainable_params
+
+
 # Hyperparameters
-num_epochs = 300
-batch_size = 2**14
-learning_rate = 0.0001
+num_epochs = 400
+batch_size = 2**11
+learning_rate = 1.0e-2
 
 # Load data
 data_dir = "./data/"
@@ -88,12 +102,17 @@ generator = GoDataGenerator(data_dir, debug=False)
 # Create model, loss, optimizer
 device = "cuda"
 model = GoNet(input_channels=go_data_gen.Board.num_feature_planes +
-              go_data_gen.Board.num_feature_scalars, width=64, depth=12).to(device)
+              go_data_gen.Board.num_feature_scalars, width=256, depth=12).to(device)
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-5)
+
+# Count the parameters
+total_params, trainable_params = count_parameters(model)
+print(f"Total parameters: {total_params}")
+print(f"Trainable parameters: {trainable_params}")
 
 # Create the scheduler
-scheduler = StepLR(optimizer, step_size=30, gamma=0.5)
+scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
 
 # Training loop
 for epoch in range(num_epochs):
@@ -107,7 +126,7 @@ for epoch in range(num_epochs):
     # Train on batch
     train_loop(train_loader, model, criterion, optimizer, device)
 
-    # Validation (keep your existing validation code)
+    # Validation
     model.eval()
     input_batch, policy_batch, _ = generator.generate_batch(batch_size // 8)
     val_data = TensorDataset(input_batch, policy_batch)

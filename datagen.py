@@ -31,26 +31,37 @@ class GoDataGenerator:
                     0, len(self.sgf_files) - 1)]
                 # print(f"Loading SGF from: {os.path.abspath(sgf_file)}")
 
-                board, moves, result = go_data_gen.load_sgf(sgf_file)
+                try:
+                    board, moves, result = go_data_gen.load_sgf(sgf_file)
 
-                play_idx = random.randint(0, len(moves) - 2)
-                next_play_idx = play_idx + 1
+                    play_idx = random.randint(0, len(moves)//4)
+                    next_play_idx = play_idx + 1
 
-                for move in moves[:next_play_idx]:
-                    board.play(move)
+                    for move in moves[:next_play_idx]:
+                        board.play(move)
 
-                if self.debug:
+                    if self.debug:
+                        print(f"Showing board with {
+                              next_play_idx} moves played:")
+                        board.print()
 
-                    print(f"Showing board with {next_play_idx} moves played:")
-                    board.print()
+                    input = self.encode_input(board, moves[play_idx])
+                    policy, value = self.encode_output(
+                        moves[next_play_idx], result)
+                    
+                    if self.debug:
+                        print(f"input plane 2: \n{input[2]}\n")
+                        print(f"policy: \n{policy}\n")
 
-                input = self.encode_input(board, moves[play_idx])
-                policy, value = self.encode_output(
-                    moves[next_play_idx], result)
+                    input_data.append(input)
+                    policy_data.append(policy)
+                    value_data.append(value)
 
-                input_data.append(input)
-                policy_data.append(policy)
-                value_data.append(value)
+                except Exception as e:
+                    print(f"Error loading SGF file: {sgf_file}")
+                    print(f"Error type: {type(e).__name__}")
+                    print(f"Error message: {str(e)}")
+                    print("Please inspect the file manually.")
 
                 pbar.update(1)
 
@@ -87,8 +98,8 @@ class GoDataGenerator:
                              go_data_gen.Board.data_size)
         # Pass is encoded just outside the board area, within the padded area.
         # Since the pass coordinate is (-1, -1), summing with the padding will work.
-        policy[next_move.coord[0] + go_data_gen.Board.padding,
-               next_move.coord[1] + go_data_gen.Board.padding] = 1.0
+        policy[next_move.coord[1] + go_data_gen.Board.padding,
+               next_move.coord[0] + go_data_gen.Board.padding] = 1.0
 
         # Encode value (game result)
         value = torch.sigmoid(torch.tensor([result]))
@@ -99,12 +110,12 @@ class GoDataGenerator:
 
         return policy, value
 
-
-# Usage example
+# # Usage example
+# torch.set_printoptions(linewidth=120)
 # data_dir = "./data/"
-# generator = GoDataGenerator(data_dir, debug=False)
+# generator = GoDataGenerator(data_dir, debug=True)
 
-# batch_size = 2**10
+# batch_size = 2**3
 # input_batch, policy_batch, value_batch = generator.generate_batch(batch_size)
 # print("Input batch shape:", input_batch.shape)
 # print("Policy batch shape:", policy_batch.shape)
