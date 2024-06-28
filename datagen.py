@@ -34,7 +34,7 @@ class GoDataGenerator:
                 try:
                     board, moves, result = go_data_gen.load_sgf(sgf_file)
 
-                    play_idx = random.randint(0, len(moves)//4)
+                    play_idx = random.randint(0, len(moves) - 2)
                     next_play_idx = play_idx + 1
 
                     for move in moves[:next_play_idx]:
@@ -48,10 +48,11 @@ class GoDataGenerator:
                     input = self.encode_input(board, moves[play_idx])
                     policy, value = self.encode_output(
                         moves[next_play_idx], result)
-                    
+
                     if self.debug:
                         print(f"input plane 2: \n{input[2]}\n")
                         print(f"policy: \n{policy}\n")
+                        print(f"value: {value}")
 
                     input_data.append(input)
                     policy_data.append(policy)
@@ -102,13 +103,16 @@ class GoDataGenerator:
                next_move.coord[0] + go_data_gen.Board.padding] = 1.0
 
         # Encode value (game result)
-        value = torch.sigmoid(torch.tensor([result]))
+        value = torch.tanh(torch.tensor([result]))
+        if next_move.color == go_data_gen.Color.Black:
+            value = -value
 
         assert policy.shape == (
             go_data_gen.Board.data_size, go_data_gen.Board.data_size)
         assert value.shape == (1,)
 
         return policy, value
+
 
 # # Usage example
 # torch.set_printoptions(linewidth=120)
