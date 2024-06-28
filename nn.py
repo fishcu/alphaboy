@@ -91,9 +91,9 @@ def count_parameters(model):
 
 
 # Hyperparameters
-num_epochs = 400
+num_epochs = 1000
 batch_size = 2**11
-learning_rate = 1.0e-2
+learning_rate = 1.0e-4
 
 # Load data
 data_dir = "./data/"
@@ -112,7 +112,7 @@ print(f"Total parameters: {total_params}")
 print(f"Trainable parameters: {trainable_params}")
 
 # Create the scheduler
-scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
+scheduler = StepLR(optimizer, step_size=100, gamma=0.5)
 
 # Training loop
 for epoch in range(num_epochs):
