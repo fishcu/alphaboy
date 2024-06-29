@@ -91,8 +91,8 @@ def count_parameters(model):
 
 
 # Hyperparameters
-num_epochs = 1000
-batch_size = 2**11
+num_epochs = 800
+batch_size = 2**13
 learning_rate = 1.0e-4
 
 # Load data
@@ -102,7 +102,7 @@ generator = GoDataGenerator(data_dir, debug=False)
 # Create model, loss, optimizer
 device = "cuda"
 model = GoNet(input_channels=go_data_gen.Board.num_feature_planes +
-              go_data_gen.Board.num_feature_scalars, width=256, depth=12).to(device)
+              go_data_gen.Board.num_feature_scalars, width=32, depth=8).to(device)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-5)
 

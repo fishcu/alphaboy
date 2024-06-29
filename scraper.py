@@ -6,8 +6,8 @@ from datetime import date, timedelta
 
 # Set the base URL and date range
 base_url = "https://katagoarchive.org/kata1/traininggames/"
-start_date = date(2023, 12, 1)
-end_date = date(2023, 12, 31)
+start_date = date(2023, 11, 1)
+end_date = date(2023, 11, 30)
 
 # Set the cooldown time in seconds between requests
 cooldown_time = 1
