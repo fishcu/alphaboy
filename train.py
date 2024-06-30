@@ -1,5 +1,3 @@
-# train.py
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -56,8 +54,8 @@ def main():
 
     # Create model, loss, optimizer
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = GoNet(input_channels=go_data_gen.Board.num_feature_planes +
-                  go_data_gen.Board.num_feature_scalars, width=32, depth=8).to(device)
+    model = GoNet(device=device, input_channels=go_data_gen.Board.num_feature_planes +
+                  go_data_gen.Board.num_feature_scalars, width=32, depth=8)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(
         model.parameters(), lr=learning_rate, weight_decay=1e-5)
@@ -94,7 +92,7 @@ def main():
         total = 0
         for inputs, labels in val_loader:
             inputs, labels = inputs.to(device), labels.to(device)
-            predicted = model.gen_move(inputs)
+            predicted = model.forward_no_grad(inputs).argmax(dim=1)
 
             # For labels: flatten and find argmax
             labels_flat = labels.view(labels.size(0), -1)
@@ -113,8 +111,7 @@ def main():
         print(f"Current learning rate: {scheduler.get_last_lr()[0]}")
 
         # Save checkpoint
-        torch.save(model.state_dict(),
-                   f'checkpoints/checkpoint_epoch_{epoch+1}.pth')
+        model.save_checkpoint(f'checkpoints/checkpoint_epoch_{epoch+1}.pth')
 
     print('Finished Training')
 
