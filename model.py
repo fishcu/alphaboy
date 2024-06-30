@@ -65,6 +65,8 @@ class GoNet(nn.Module):
         policy = torch.reshape(
             policy, (go_data_gen.Board.data_size, go_data_gen.Board.data_size))
 
+        print(policy)
+
         # Apply legality map
         legal_map = board.get_legal_map(to_play)
         # print(legal_map)

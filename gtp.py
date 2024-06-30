@@ -1,3 +1,5 @@
+import argparse
+
 import torch
 
 import go_data_gen
@@ -143,9 +145,17 @@ class GoGTPEngine:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Load a GoNet model and run the GoGTPEngine")
+    parser.add_argument("checkpoint_path", type=str,
+                        help="Path to the checkpoint file")
+    args = parser.parse_args()
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = GoNet(device=device, input_channels=go_data_gen.Board.num_feature_planes +
-                  go_data_gen.Board.num_feature_scalars, width=32, depth=8).to(device)
+
+    model = GoNet.load_from_checkpoint(
+        checkpoint_path=args.checkpoint_path, device=device)
+
     board = go_data_gen.Board()
     engine = GoGTPEngine(model, board, device)
     engine.run()
