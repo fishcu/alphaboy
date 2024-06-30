@@ -33,10 +33,19 @@ class GoNet(nn.Module):
         self.network = nn.Sequential(*layers)
 
     def forward(self, x):
+        self.train()  # Set to train mode
         x = self.network(x)
         x = x.view(x.size(0), -1)  # flatten
         policy = torch.softmax(x, dim=1)
         return policy
+
+    def gen_move(self, x):
+        self.eval()  # Set to eval mode
+        with torch.no_grad():
+            output = self(x)
+            move = output.argmax(dim=1)
+
+        return move
 
 
 def count_parameters(model):

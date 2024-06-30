@@ -6,6 +6,52 @@ from tqdm import tqdm
 import go_data_gen
 
 
+def encode_input(board: go_data_gen.Board, to_play: go_data_gen.Color):
+    # Get 2D feature planes and scalar features as numpy arrays
+    stacked_maps, scalar_features = board.get_nn_input_data(to_play)
+    assert stacked_maps.shape == (
+        go_data_gen.Board.num_feature_planes, go_data_gen.Board.data_size, go_data_gen.Board.data_size)
+    assert scalar_features.shape == (
+        go_data_gen.Board.num_feature_scalars,)
+
+    # Convert numpy arrays to PyTorch tensors
+    stacked_maps_tensor = torch.from_numpy(stacked_maps)
+    scalar_features_tensor = torch.from_numpy(scalar_features)
+
+    # Repeat scalar features across spatial dimensions
+    scalar_features_expanded = scalar_features_tensor.unsqueeze(1).unsqueeze(2).expand(
+        -1, go_data_gen.Board.data_size, go_data_gen.Board.data_size)
+
+    # Stack the expanded scalar features with the stacked maps
+    x = torch.cat([stacked_maps_tensor, scalar_features_expanded], dim=0)
+
+    assert x.shape == (go_data_gen.Board.num_feature_planes + go_data_gen.Board.num_feature_scalars,
+                       go_data_gen.Board.data_size, go_data_gen.Board.data_size)
+
+    return x
+
+
+def encode_output(next_move: go_data_gen.Move, result: float):
+    # Encode policy (next move)
+    policy = torch.zeros(go_data_gen.Board.data_size,
+                         go_data_gen.Board.data_size)
+    # Pass is encoded just outside the board area, within the padded area.
+    # Since the pass coordinate is (-1, -1), summing with the padding will work.
+    policy[next_move.coord[1] + go_data_gen.Board.padding,
+           next_move.coord[0] + go_data_gen.Board.padding] = 1.0
+
+    # Encode value (game result)
+    value = torch.tanh(torch.tensor([result]))
+    if next_move.color == go_data_gen.Color.Black:
+        value = -value
+
+    assert policy.shape == (
+        go_data_gen.Board.data_size, go_data_gen.Board.data_size)
+    assert value.shape == (1,)
+
+    return policy, value
+
+
 class GoDataGenerator:
     def __init__(self, data_dir, debug=False):
         self.data_dir = data_dir
@@ -20,7 +66,7 @@ class GoDataGenerator:
                     sgf_files.append(os.path.join(root, file))
         return sgf_files
 
-    def generate_batch(self, batch_size):
+    def generate_batch(self, batch_size: int):
         input_data = []
         policy_data = []
         value_data = []
@@ -45,9 +91,9 @@ class GoDataGenerator:
                               next_play_idx} moves played:")
                         board.print()
 
-                    input = self.encode_input(board, moves[play_idx])
-                    policy, value = self.encode_output(
-                        moves[next_play_idx], result)
+                    input = encode_input(
+                        board, go_data_gen.opposite(moves[play_idx].color))
+                    policy, value = encode_output(moves[next_play_idx], result)
 
                     if self.debug:
                         print(f"input plane 2: \n{input[2]}\n")
@@ -68,59 +114,19 @@ class GoDataGenerator:
 
         return (torch.stack(input_data), torch.stack(policy_data), torch.cat(value_data))
 
-    def encode_input(self, board, move):
-        # Get 2D feature planes and scalar features as numpy arrays
-        stacked_maps, scalar_features = board.get_nn_input_data(
-            go_data_gen.opposite(move.color))
-        assert stacked_maps.shape == (
-            go_data_gen.Board.num_feature_planes, go_data_gen.Board.data_size, go_data_gen.Board.data_size)
-        assert scalar_features.shape == (
-            go_data_gen.Board.num_feature_scalars,)
 
-        # Convert numpy arrays to PyTorch tensors
-        stacked_maps_tensor = torch.from_numpy(stacked_maps)
-        scalar_features_tensor = torch.from_numpy(scalar_features)
+def main():
+    torch.set_printoptions(linewidth=120)
+    data_dir = "./data/"
+    generator = GoDataGenerator(data_dir, debug=True)
 
-        # Repeat scalar features across spatial dimensions
-        scalar_features_expanded = scalar_features_tensor.unsqueeze(1).unsqueeze(2).expand(
-            -1, go_data_gen.Board.data_size, go_data_gen.Board.data_size)
-
-        # Stack the expanded scalar features with the stacked maps
-        x = torch.cat([stacked_maps_tensor, scalar_features_expanded], dim=0)
-
-        assert x.shape == (go_data_gen.Board.num_feature_planes + go_data_gen.Board.num_feature_scalars,
-                           go_data_gen.Board.data_size, go_data_gen.Board.data_size)
-
-        return x
-
-    def encode_output(self, next_move, result):
-        # Encode policy (next move)
-        policy = torch.zeros(go_data_gen.Board.data_size,
-                             go_data_gen.Board.data_size)
-        # Pass is encoded just outside the board area, within the padded area.
-        # Since the pass coordinate is (-1, -1), summing with the padding will work.
-        policy[next_move.coord[1] + go_data_gen.Board.padding,
-               next_move.coord[0] + go_data_gen.Board.padding] = 1.0
-
-        # Encode value (game result)
-        value = torch.tanh(torch.tensor([result]))
-        if next_move.color == go_data_gen.Color.Black:
-            value = -value
-
-        assert policy.shape == (
-            go_data_gen.Board.data_size, go_data_gen.Board.data_size)
-        assert value.shape == (1,)
-
-        return policy, value
+    batch_size = 2**3
+    input_batch, policy_batch, value_batch = generator.generate_batch(
+        batch_size)
+    print("Input batch shape:", input_batch.shape)
+    print("Policy batch shape:", policy_batch.shape)
+    print("Value batch shape:", value_batch.shape)
 
 
-# # Usage example
-# torch.set_printoptions(linewidth=120)
-# data_dir = "./data/"
-# generator = GoDataGenerator(data_dir, debug=True)
-
-# batch_size = 2**3
-# input_batch, policy_batch, value_batch = generator.generate_batch(batch_size)
-# print("Input batch shape:", input_batch.shape)
-# print("Policy batch shape:", policy_batch.shape)
-# print("Value batch shape:", value_batch.shape)
+if __name__ == "__main__":
+    main()
