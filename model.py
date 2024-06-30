@@ -40,16 +40,22 @@ class GoNet(nn.Module):
 
     def forward(self, x):
         self.train()  # Set to train mode
-        x = self.network(x.to(self.device))
-        x = x.view(x.size(0), -1)  # flatten
-        policy = torch.softmax(x, dim=1)
+        y = self.network(x.to(self.device)).squeeze()
+        y_flattened = y.reshape(y.shape[0], -1)
+        policy = torch.softmax(y_flattened, dim=1).reshape(y.shape)
         return policy
 
     def forward_no_grad(self, x):
         self.eval()  # Set to eval mode
         with torch.no_grad():
-            output = self(x.to(self.device))
-        return output
+            y = self.network(x.to(self.device)).squeeze()
+            # print(y.shape)
+            # print(y)
+            y_flattened = y.reshape(y.shape[0], -1)
+            policy = torch.softmax(y_flattened, dim=1).reshape(y.shape)
+            # print(policy.shape)
+            # print(policy)
+        return policy
 
     def gen_move(self, board: go_data_gen.Board, to_play: go_data_gen.Color):
         x = encode_input(board, to_play).unsqueeze(0).to(self.device)

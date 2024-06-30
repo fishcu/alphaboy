@@ -9,40 +9,9 @@ import go_data_gen
 from model import GoNet, count_parameters
 
 
-def train_loop(dataloader, model, loss_fn, optimizer, device):
-    size = len(dataloader.dataset)
-    model.train()
-    for batch, (inputs, labels) in enumerate(dataloader):
-        inputs, labels = inputs.to(device), labels.to(device)
-
-        # Compute prediction and loss
-        outputs = model(inputs)
-
-        # Flatten both outputs and labels
-        outputs_flat = outputs.view(outputs.size(0), -1)
-        labels_flat = labels.view(labels.size(0), -1)
-
-        # Compute loss
-        loss = loss_fn(outputs_flat, labels_flat)
-
-        # Backpropagation
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        # Calculate accuracy
-        predicted = outputs_flat.argmax(dim=1)
-        labels_argmax = labels_flat.argmax(dim=1)
-        correct = (predicted == labels_argmax).sum().item()
-        accuracy = correct / labels.size(0)
-
-        if batch % 10 == 0:
-            loss, current = loss.item(), batch * len(inputs)
-            print(f"loss: {loss:>7f}  accuracy: {
-                  accuracy:>7f}  [{current:>5d}/{size:>5d}]")
-
-
 def main():
+    torch.set_printoptions(linewidth=120)
+
     # Hyperparameters
     num_epochs = 800
     batch_size = 2**13
@@ -56,7 +25,7 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = GoNet(device=device, input_channels=go_data_gen.Board.num_feature_planes +
                   go_data_gen.Board.num_feature_scalars, width=32, depth=8)
-    criterion = nn.CrossEntropyLoss()
+    loss_fn = nn.CrossEntropyLoss()
     optimizer = optim.Adam(
         model.parameters(), lr=learning_rate, weight_decay=1e-5)
 
@@ -79,10 +48,28 @@ def main():
             train_data, batch_size=batch_size, shuffle=True)
 
         # Train on batch
-        train_loop(train_loader, model, criterion, optimizer, device)
+        for inputs, labels in train_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            outputs = model(inputs)
+
+            outputs_flat = outputs.view(outputs.size(0), -1)
+            labels_flat = labels.view(labels.size(0), -1)
+            loss = loss_fn(outputs_flat, labels_flat)
+
+            # Backpropagation
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            # Calculate accuracy
+            correct = (outputs_flat.argmax(dim=1) ==
+                       labels_flat.argmax(dim=1)).sum().item()
+            accuracy = correct / labels.size(0)
+            print(f"loss: {loss.item():>7f}  accuracy: {
+                  100.0 * accuracy:.2f}%")
 
         # Validation
-        model.eval()
         input_batch, policy_batch, _ = generator.generate_batch(
             batch_size // 8)
         val_data = TensorDataset(input_batch, policy_batch)
@@ -92,22 +79,21 @@ def main():
         total = 0
         for inputs, labels in val_loader:
             inputs, labels = inputs.to(device), labels.to(device)
-            predicted = model.forward_no_grad(inputs).argmax(dim=1)
 
-            # For labels: flatten and find argmax
+            outputs = model.forward_no_grad(inputs)
+
+            outputs_flat = outputs.view(outputs.size(0), -1)
             labels_flat = labels.view(labels.size(0), -1)
-            labels_argmax = labels_flat.argmax(dim=1)
 
-            # Compare predictions
-            correct += (predicted == labels_argmax).sum().item()
+            # Calculate accuracy
+            correct += (outputs_flat.argmax(dim=1) ==
+                        labels_flat.argmax(dim=1)).sum().item()
             total += labels.size(0)
 
         print(f'Validation Accuracy: {100 * correct / total:.2f}%')
 
         # Step the scheduler
         scheduler.step()
-
-        # Print current learning rate
         print(f"Current learning rate: {scheduler.get_last_lr()[0]}")
 
         # Save checkpoint
