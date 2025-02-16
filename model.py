@@ -2,6 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from torchinfo import summary
+
+import go_data_gen
+
 
 class NestedBottleneckBlock(nn.Module):
     """
@@ -105,9 +109,7 @@ class GoNet(nn.Module):
         # Convert model to channels_last format
         self = self.to(memory_format=torch.channels_last)
 
-    def forward(self, x):
-        spatial_input, scalar_input = x  # [N, H, W, C_in], [N, F]
-
+    def forward(self, spatial_input, scalar_input):
         # Process spatial features
         spatial_features = spatial_input.permute(0, 3, 1, 2)  # [N, C_in, H, W]
         spatial_features = self.input_process.spatial_conv(spatial_features)
@@ -158,3 +160,29 @@ class GoNet(nn.Module):
         value = torch.sigmoid(value)
 
         return policy, value
+
+
+def main():
+    # Initialize model
+    model = GoNet(
+        num_input_planes=go_data_gen.Board.num_feature_planes,
+        num_input_features=go_data_gen.Board.num_feature_scalars,
+        channels=64,
+        num_blocks=4,
+        c_head=32
+    )
+
+    # Print model summary
+    summary(model,
+            input_size=[(1, go_data_gen.Board.data_size,
+                        go_data_gen.Board.data_size,
+                        go_data_gen.Board.num_feature_planes),
+                        (1, go_data_gen.Board.num_feature_scalars)],
+            col_names=["input_size", "output_size", "num_params", "kernel_size",
+                       "mult_adds"],
+            col_width=20,
+            row_settings=["var_names"])
+
+
+if __name__ == "__main__":
+    main()
