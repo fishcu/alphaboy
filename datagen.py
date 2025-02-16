@@ -23,12 +23,13 @@ class GoDataGenerator:
         return sgf_files
 
     def generate_batch(self, batch_size: int):
-        input_data = []
+        spatial_data = []
+        scalar_data = []
         policy_data = []
         value_data = []
 
         with tqdm(total=batch_size, desc="Generating minibatch") as pbar:
-            while len(input_data) < batch_size:
+            while len(spatial_data) < batch_size:
                 sgf_file = self.sgf_files[random.randint(
                     0, len(self.sgf_files) - 1)]
 
@@ -54,9 +55,6 @@ class GoDataGenerator:
                         board.get_feature_planes(to_play))
                     scalar_features = torch.from_numpy(
                         board.get_feature_scalars(to_play))
-
-                    # Combine into input tensor
-                    input = (spatial_features, scalar_features)
 
                     # Create policy target - one-hot encoding of next move
                     next_move = moves[next_play_idx]
@@ -90,7 +88,8 @@ class GoDataGenerator:
 
                         print(f"\nValue target: {value.item():.1f}")
 
-                    input_data.append(input)
+                    spatial_data.append(spatial_features)
+                    scalar_data.append(scalar_features)
                     policy_data.append(policy)
                     value_data.append(value)
 
@@ -103,13 +102,13 @@ class GoDataGenerator:
 
                 pbar.update(1)
 
-        # Stack the batches, maintaining NHWC format for spatial features
-        spatial_batch = torch.stack([x[0] for x in input_data])
-        scalar_batch = torch.stack([x[1] for x in input_data])
-        policy_batch = torch.stack(policy_data)
-        value_batch = torch.cat(value_data)
+        # Stack the batches
+        spatial_batch = torch.stack(spatial_data)  # [N, H, W, C]
+        scalar_batch = torch.stack(scalar_data)    # [N, F]
+        policy_batch = torch.stack(policy_data)    # [N, H*W + 1]
+        value_batch = torch.cat(value_data)        # [N, 1]
 
-        return ((spatial_batch, scalar_batch), policy_batch, value_batch)
+        return spatial_batch, scalar_batch, policy_batch, value_batch
 
 
 def main():
@@ -119,7 +118,8 @@ def main():
     generator = GoDataGenerator(data_dir, debug=True)
 
     batch_size = 2**3
-    (spatial_batch, scalar_batch), policy_batch, value_batch = generator.generate_batch(batch_size)
+    spatial_batch, scalar_batch, policy_batch, value_batch = generator.generate_batch(
+        batch_size)
     print("Spatial input batch shape:", spatial_batch.shape)
     print("Scalar input batch shape:", scalar_batch.shape)
     print("Policy batch shape:", policy_batch.shape)

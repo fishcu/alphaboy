@@ -6,6 +6,8 @@ from torchinfo import summary
 
 import go_data_gen
 
+from datagen import GoDataGenerator
+
 
 class NestedBottleneckBlock(nn.Module):
     """
@@ -182,6 +184,31 @@ def main():
                        "mult_adds"],
             col_width=20,
             row_settings=["var_names"])
+
+    # Get data and move to GPU
+    data_dir = "./data/2025-02-13sgfs"
+    generator = GoDataGenerator(data_dir, debug=False)
+    spatial_batch, scalar_batch, policy_batch, value_batch = generator.generate_batch(
+        batch_size=2)
+
+    spatial_batch = spatial_batch.cuda()
+    scalar_batch = scalar_batch.cuda()
+
+    # Forward pass
+    policy_out, value_out = model(spatial_batch, scalar_batch)
+
+    # Print shapes to verify matching interfaces
+    print("\nInput shapes:")
+    print("Spatial input:", spatial_batch.shape)
+    print("Scalar input:", scalar_batch.shape)
+
+    print("\nTarget shapes:")
+    print("Policy target:", policy_batch.shape)
+    print("Value target:", value_batch.shape)
+
+    print("\nOutput shapes:")
+    print("Policy output:", policy_out.shape)
+    print("Value output:", value_out.shape)
 
 
 if __name__ == "__main__":
