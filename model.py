@@ -152,10 +152,9 @@ class GoNet(nn.Module):
         # Convert policy map back to NHWC format and flatten for board positions
         policy_map = policy_map.reshape(policy_map.shape[0], -1)  # [N, H*W]
 
-        # Combine policy map with pass move and apply softmax
+        # Combine policy map with pass move and apply mask pre-softmax
         policy_logits = torch.cat(
             [policy_map, policy_pass], dim=1)  # [N, H*W + 1]
-        policy = F.softmax(policy_logits, dim=1)
 
         # Create legal moves mask with pass always legal
         legal_moves = spatial_input[..., 0].reshape(
@@ -163,9 +162,22 @@ class GoNet(nn.Module):
         legal_moves = torch.cat(
             [legal_moves, torch.ones_like(policy_pass)], dim=1)  # [N, H*W + 1]
 
-        # Apply mask and renormalize
+        # Apply mask pre-softmax (set illegal moves to large negative value)
+        policy_logits = torch.where(
+            legal_moves > 0, policy_logits, torch.full_like(policy_logits, -1e7))
+
+        # Apply softmax
+        policy = F.softmax(policy_logits, dim=1)
+
+        # Apply mask again to ensure exactly zero probability for illegal moves
         policy = policy * legal_moves
-        policy = policy / policy.sum(dim=1, keepdim=True)  # Renormalize
+        policy_sum = policy.sum(dim=1, keepdim=True)
+        assert torch.all(
+            policy_sum > 1e-6), f"Policy sum too small: {policy_sum.min().item()}"
+        policy = policy / policy_sum  # Renormalize
+
+        # Clamp values to ensure they're strictly within [0,1]
+        policy = torch.clamp(policy, 0.0, 1.0)
 
         # Apply sigmoid to value
         value = torch.sigmoid(value)

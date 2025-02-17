@@ -219,7 +219,7 @@ def main():
     num_epochs = 1000
     batch_size = 32
     learning_rate = 0.01
-    steps_per_epoch = 100
+    steps_per_epoch = 1000
     eval_steps = 100
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     save_dir = './checkpoints'
@@ -263,7 +263,7 @@ def main():
         print(f'Current learning rate: {scheduler.get_last_lr()[0]}')
 
         # Save model checkpoint
-        if (epoch + 1) % 1 == 0:
+        if (epoch + 1) % 10 == 0:
             total_loss = train_policy_loss + train_value_loss
             save_model(model, optimizer, scheduler,
                        epoch + 1, total_loss, save_dir)
