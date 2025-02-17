@@ -155,8 +155,17 @@ class GoNet(nn.Module):
         # Combine policy map with pass move and apply softmax
         policy_logits = torch.cat(
             [policy_map, policy_pass], dim=1)  # [N, H*W + 1]
-        # Softmax over all moves including pass
         policy = F.softmax(policy_logits, dim=1)
+
+        # Create legal moves mask with pass always legal
+        legal_moves = spatial_input[..., 0].reshape(
+            spatial_input.shape[0], -1)  # [N, H*W]
+        legal_moves = torch.cat(
+            [legal_moves, torch.ones_like(policy_pass)], dim=1)  # [N, H*W + 1]
+
+        # Apply mask and renormalize
+        policy = policy * legal_moves
+        policy = policy / policy.sum(dim=1, keepdim=True)  # Renormalize
 
         # Apply sigmoid to value
         value = torch.sigmoid(value)
@@ -186,7 +195,7 @@ def main():
             row_settings=["var_names"])
 
     # Get data and move to GPU
-    data_dir = "./data/2025-02-13sgfs"
+    data_dir = "./data/val"
     generator = GoDataGenerator(data_dir, debug=False)
     spatial_batch, scalar_batch, policy_batch, value_batch = generator.generate_batch(
         batch_size=2)
