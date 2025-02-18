@@ -105,6 +105,34 @@ def save_model(model, optimizer, scheduler, epoch, loss, save_dir):
     filename = f'model_epoch{epoch}_{timestamp}.pt'
     filepath = os.path.join(save_dir, filename)
 
+    # Save model hyperparameters
+    model_config = {
+        'num_input_planes': model.input_process.spatial_conv.in_channels,
+        'num_input_features': model.input_process.scalar_linear.in_features,
+        'channels': model.blocks[0].conv1.out_channels * 2,  # Multiply by 2 since blocks use half channels
+        'num_blocks': len(model.blocks),
+        'c_head': model.head_conv.out_channels
+    }
+
+    torch.save({
+        'epoch': epoch,
+        'model_config': model_config,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict(),
+        'loss': loss,
+    }, filepath)
+
+    return filepath
+
+def save_model_legacy(model, optimizer, scheduler, epoch, loss, save_dir):
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f'model_epoch{epoch}_{timestamp}.pt'
+    filepath = os.path.join(save_dir, filename)
+
     torch.save({
         'epoch': epoch,
         'model_state_dict': model.state_dict(),
@@ -116,14 +144,101 @@ def save_model(model, optimizer, scheduler, epoch, loss, save_dir):
     return filepath
 
 
-def load_model(model, optimizer, scheduler, filepath):
-    checkpoint = torch.load(filepath)
+def load_model(checkpoint_path, device="cuda"):
+    """
+    Load a model from a checkpoint file.
+    
+    Args:
+        checkpoint_path (str): Path to the checkpoint file
+        device (str): Device to load the model on ('cuda' or 'cpu')
+    
+    Returns:
+        tuple: (model, optimizer, scheduler, epoch, loss)
+    """
+    # Load the checkpoint
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    
+    # Create model from saved config
+    model = GoNet(**checkpoint['model_config']).to(device)
     model.load_state_dict(checkpoint['model_state_dict'])
+    
+    # Create optimizer and scheduler
+    optimizer = optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-4)
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    
+    # Create scheduler
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=1000, eta_min=1e-6)  # Default values from main()
     scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+    
     epoch = checkpoint['epoch']
     loss = checkpoint['loss']
 
+    return model, optimizer, scheduler, epoch, loss
+
+
+def load_model_legacy(checkpoint_path, device="cuda"):
+    """
+    Load a model from a legacy checkpoint file that doesn't include model_config.
+    Infers parameters from the state dictionary.
+    
+    Args:
+        checkpoint_path (str): Path to the checkpoint file
+        device (str): Device to load the model on ('cuda' or 'cpu')
+    
+    Returns:
+        tuple: (model, optimizer, scheduler, epoch, loss)
+    """
+    # Load the checkpoint
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    state_dict = checkpoint['model_state_dict']
+    
+    # Infer model parameters from the state dict
+    first_conv_weight = state_dict['input_process.spatial_conv.weight']
+    num_input_planes = first_conv_weight.size(1)
+    
+    first_linear_weight = state_dict['input_process.scalar_linear.weight']
+    num_input_features = first_linear_weight.size(1)
+    
+    channels = first_conv_weight.size(0)
+    
+    # Count number of blocks by looking at the highest block index
+    block_numbers = set()
+    for key in state_dict.keys():
+        if 'blocks.' in key:
+            block_idx = int(key.split('.')[1])
+            block_numbers.add(block_idx)
+    num_blocks = max(block_numbers) + 1 if block_numbers else 0
+    
+    c_head = state_dict['head_conv.weight'].size(0)
+    
+    print(f"Inferred architecture: input_planes={num_input_planes}, "
+          f"input_features={num_input_features}, channels={channels}, "
+          f"num_blocks={num_blocks}, c_head={c_head}")
+    
+    # Create model with inferred parameters
+    model = GoNet(
+        num_input_planes=num_input_planes,
+        num_input_features=num_input_features,
+        channels=channels,
+        num_blocks=num_blocks,
+        c_head=c_head
+    ).to(device)
+    
+    # Load the state dict
+    model.load_state_dict(state_dict)
+    
+    # Create optimizer and scheduler with default parameters
+    optimizer = optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-4)
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=1000, eta_min=1e-6)
+    scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+    
+    epoch = checkpoint['epoch']
+    loss = checkpoint['loss']
+    
     return model, optimizer, scheduler, epoch, loss
 
 
