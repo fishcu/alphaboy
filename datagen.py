@@ -56,32 +56,32 @@ class GoDataGenerator:
                 scalar_features = torch.from_numpy(
                     board.get_feature_scalars(to_play))
 
-                # Create policy target - one-hot encoding of next move
-                policy = torch.zeros((board.data_size * board.data_size + 1))
+                # Create policy target - index of next move
+                policy = torch.tensor(0, dtype=torch.long)  # Scalar tensor instead of size [1]
                 next_move = moves[next_play_idx]
                 if next_move.is_pass:
-                    policy[-1] = 1.0  # Last index represents pass
+                    policy = torch.tensor(board.data_size * board.data_size)  # Last index represents pass
                 else:
                     # Add padding to convert board coordinates to memory coordinates
                     mem_x = next_move.coord.x + board.padding
                     mem_y = next_move.coord.y + board.padding
                     move_idx = mem_y * board.data_size + mem_x
-                    policy[move_idx] = 1.0
+                    policy = torch.tensor(move_idx)
 
-                # Create value target
-                value = torch.tensor([result], dtype=torch.float32)
-                # Adjust for player perspective
-                if to_play == go_data_gen.Color.White:
-                    value = -value
-                # Apply steep sigmoid with scaling factor
-                scale = 10.0
-                value = torch.sigmoid(scale * value)
+                # Create value target (+1 for win, 0 for loss, 0.5 for draw)
+                value = torch.tensor(0.5, dtype=torch.float32)
+                if result > 0:  # Win for Black
+                    value = torch.tensor(1.0 if to_play == go_data_gen.Color.Black else 0.0, dtype=torch.float32)
+                elif result < 0:  # Win for White
+                    value = torch.tensor(1.0 if to_play == go_data_gen.Color.White else 0.0, dtype=torch.float32)
 
                 if self.debug:
                     print("\nPolicy as board position:")
-                    policy_grid = policy[:-1].reshape(board.data_size, board.data_size)
+                    policy_grid = torch.zeros(board.data_size * board.data_size + 1)
+                    policy_grid[policy.item()] = 1.0  # Set the chosen move to 1.0
+                    policy_grid = policy_grid[:-1].reshape(board.data_size, board.data_size)
                     print(policy_grid.numpy())
-                    print(f"Pass probability: {policy[-1]:.1f}")
+                    print(f"Pass move selected: {policy.item() == board.data_size * board.data_size}")
                     print(f"\nValue target: {value.item():.1f}")
 
                 spatial_data.append(spatial_features)
@@ -90,17 +90,17 @@ class GoDataGenerator:
                 value_data.append(value)
 
             except Exception as e:
-                # print(f"Error loading SGF file: {sgf_file}")
-                # print(f"Error type: {type(e).__name__}")
-                # print(f"Error message: {str(e)}")
-                # print("Please inspect the file manually.")
+                print(f"Error loading SGF file: {sgf_file}")
+                print(f"Error type: {type(e).__name__}")
+                print(f"Error message: {str(e)}")
+                print("Please inspect the file manually.")
                 continue
 
         # Stack the batches
         spatial_batch = torch.stack(spatial_data)  # [N, H, W, C]
         scalar_batch = torch.stack(scalar_data)    # [N, F]
-        policy_batch = torch.stack(policy_data)    # [N, H*W + 1]
-        value_batch = torch.cat(value_data)        # [N, 1]
+        policy_batch = torch.stack(policy_data)    # [N]
+        value_batch = torch.stack(value_data)    # [N]
 
         self.current_board = board
         self.current_move = moves[next_play_idx]
@@ -126,29 +126,18 @@ def main():
 
     if next_move.is_pass:
         print("Target move is PASS")
-        print(f"Pass probability in policy: {policy[-1]:.1f}")
-        assert policy[-1] == 1.0, f"Pass move should have probability 1.0, got {policy[-1]:.1f}"
+        expected_idx = board.data_size * board.data_size
+        assert policy.item() == expected_idx, f"Pass move should have index {expected_idx}, got {policy.item()}"
     else:
-        print(
-            f"Target move (board coordinates): ({next_move.coord.x}, {next_move.coord.y})")
+        print(f"Target move (board coordinates): ({next_move.coord.x}, {next_move.coord.y})")
         mem_x = next_move.coord.x + board.padding
         mem_y = next_move.coord.y + board.padding
         print(f"Target move (memory coordinates): ({mem_x}, {mem_y})")
-        move_idx = mem_y * board.data_size + mem_x
-        print(f"Target move index in policy vector: {move_idx}")
-        policy_value = policy[move_idx].item()
-        print(f"Policy value at target index: {policy_value:.1f}")
-        assert policy_value == 1.0, f"Target move should have probability 1.0, got {policy_value:.1f}"
-        assert torch.sum(
-            policy) == 1.0, f"Policy should sum to 1.0, got {torch.sum(policy):.1f}"
-
-    # Print policy as 2D grid (excluding pass move)
-    print("\nPolicy as 2D grid (memory coordinates):")
-    policy_grid = policy[:-1].reshape(board.data_size, board.data_size)
-    print(policy_grid.numpy())
+        expected_idx = mem_y * board.data_size + mem_x
+        print(f"Target move index: {expected_idx}")
+        assert policy.item() == expected_idx, f"Target move should have index {expected_idx}, got {policy.item()}"
 
     print("\nLegal moves plane (memory coordinates):")
-    # Also show last example's legal moves
     print(spatial_batch[-1, :, :, 0].numpy())
 
     print("\nBatch shapes:")

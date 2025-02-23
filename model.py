@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import os
+from datetime import datetime
+import torch.optim as optim
 
 from torchinfo import summary
 
@@ -51,8 +54,7 @@ class NestedBottleneckBlock(nn.Module):
         identity = x
 
         # First 1x1 conv
-        out = self.act(self.bn1(x))
-        out = self.conv1(out)
+        out = self.conv1(self.act(self.bn1(x)))
 
         # First pair of 3x3 convs
         temp = self.conv2(self.act(self.bn2(out)))
@@ -70,7 +72,7 @@ class NestedBottleneckBlock(nn.Module):
 
 class GoNet(nn.Module):
     def __init__(self, num_input_planes: int, num_input_features: int,
-                 channels: int = 64, num_blocks: int = 4, c_head: int = 32):
+                 channels: int = 96, num_blocks: int = 4, c_head: int = 64):
         super(GoNet, self).__init__()
 
         # Input processing block
@@ -78,8 +80,8 @@ class GoNet(nn.Module):
             'spatial_conv': nn.Conv2d(
                 in_channels=num_input_planes,
                 out_channels=channels,
-                kernel_size=5,
-                padding=2,
+                kernel_size=1,
+                padding=0,
                 bias=False
             ),
             'scalar_linear': nn.Linear(
@@ -97,22 +99,26 @@ class GoNet(nn.Module):
             nn.ReLU(inplace=True)
         )
 
-        # Head processing
-        self.head_conv = nn.Conv2d(channels, c_head, kernel_size=1, bias=False)
-
-        # Policy head
+        # Policy head for board moves
         self.policy_conv = nn.Conv2d(channels, 1, kernel_size=1)
-        # 2 because of avg+max pooling
-        self.policy_pass = nn.Linear(c_head * 2, 1)
 
-        # Value head
-        self.value = nn.Linear(c_head * 2, 1)
+        # Shared processing for pass and value
+        self.shared_fc = nn.Linear(channels, c_head)
+        self.shared_act = nn.ReLU()
+
+        # Combined pass and value head
+        # 2 outputs: pass logit and value
+        self.pass_value_fc = nn.Linear(c_head, 2)
 
         # Convert model to channels_last format
         self = self.to(memory_format=torch.channels_last)
 
     def forward(self, spatial_input, scalar_input):
+        # Get legal moves mask from first feature plane before permuting
+        legal_moves_mask = spatial_input[..., 0]  # [N, H, W]
+
         # Process spatial features
+        # Convert from NHWC to NCHW format
         spatial_features = spatial_input.permute(0, 3, 1, 2)  # [N, C_in, H, W]
         spatial_features = self.input_process.spatial_conv(spatial_features)
 
@@ -130,59 +136,119 @@ class GoNet(nn.Module):
             x = block(x)
         trunk_output = self.trunk_final(x)  # [N, C, H, W]
 
-        # Head features processing
-        head_features = self.head_conv(trunk_output)  # [N, c_head, H, W]
+        # Policy head for board moves
+        policy = self.policy_conv(trunk_output)
 
-        # Global pooling (both average and max)
-        avg_pooled = F.adaptive_avg_pool2d(
-            head_features, 1).squeeze(-1).squeeze(-1)  # [N, c_head]
-        max_pooled = F.adaptive_max_pool2d(
-            head_features, 1).squeeze(-1).squeeze(-1)  # [N, c_head]
-        pooled_features = torch.cat(
-            [avg_pooled, max_pooled], dim=1)  # [N, c_head*2]
+        # Global average pooling for pass and value heads
+        pooled = torch.mean(trunk_output, dim=(2, 3))  # [N, C]
 
-        # Policy head
-        policy_map = self.policy_conv(trunk_output)  # [N, 1, H, W]
-        policy_map = policy_map.squeeze(1)  # [N, H, W]
-        policy_pass = self.policy_pass(pooled_features)  # [N, 1]
+        # Shared processing for pass and value
+        shared = self.shared_fc(pooled)
+        shared = self.shared_act(shared)
 
-        # Value head
-        value = self.value(pooled_features)  # [N, 1]
+        # Pass and value head
+        pass_logit, value = self.pass_value_fc(shared).split(1, dim=-1)
 
-        # Convert policy map back to NHWC format and flatten for board positions
-        policy_map = policy_map.reshape(policy_map.shape[0], -1)  # [N, H*W]
+        # Squeeze last dimension from pass and value
+        pass_logit = pass_logit.squeeze(-1)
+        value = value.squeeze(-1)
 
-        # Combine policy map with pass move and apply mask pre-softmax
-        policy_logits = torch.cat(
-            [policy_map, policy_pass], dim=1)  # [N, H*W + 1]
+        # Process policy output with legal moves mask
+        combined_policy = self.process_policy_output(
+            policy, pass_logit, legal_moves_mask)
 
-        # Create legal moves mask with pass always legal
-        legal_moves = spatial_input[..., 0].reshape(
-            spatial_input.shape[0], -1)  # [N, H*W]
-        legal_moves = torch.cat(
-            [legal_moves, torch.ones_like(policy_pass)], dim=1)  # [N, H*W + 1]
+        return combined_policy, value
 
-        # Apply mask pre-softmax (set illegal moves to large negative value)
-        policy_logits = torch.where(
-            legal_moves > 0, policy_logits, torch.full_like(policy_logits, -1e7))
+    def save_checkpoint(self, optimizer, scheduler, epoch, loss, save_dir):
+        """Save model checkpoint including optimizer and scheduler states."""
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
 
-        # Apply softmax
-        policy = F.softmax(policy_logits, dim=1)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'model_epoch{epoch}_{timestamp}.pt'
+        filepath = os.path.join(save_dir, filename)
 
-        # Apply mask again to ensure exactly zero probability for illegal moves
-        policy = policy * legal_moves
-        policy_sum = policy.sum(dim=1, keepdim=True)
-        assert torch.all(
-            policy_sum > 1e-6), f"Policy sum too small: {policy_sum.min().item()}"
-        policy = policy / policy_sum  # Renormalize
+        # Save model hyperparameters
+        model_config = {
+            'num_input_planes': self.input_process.spatial_conv.in_channels,
+            'num_input_features': self.input_process.scalar_linear.in_features,
+            'channels': self.input_process.spatial_conv.out_channels,  # Direct channel count
+            'num_blocks': len(self.blocks),
+            'c_head': self.shared_fc.out_features  # Use shared head dimension
+        }
 
-        # Clamp values to ensure they're strictly within [0,1]
-        policy = torch.clamp(policy, 0.0, 1.0)
+        # Extract optimizer and scheduler configs
+        optimizer_config = {
+            'lr': optimizer.param_groups[0]['lr'],
+            'weight_decay': optimizer.param_groups[0]['weight_decay']
+        }
 
-        # Apply sigmoid to value
-        value = torch.sigmoid(value)
+        scheduler_config = {
+            'T_max': scheduler.T_max,
+            'eta_min': scheduler.eta_min
+        }
 
-        return policy, value
+        torch.save({
+            'epoch': epoch,
+            'model_config': model_config,
+            'optimizer_config': optimizer_config,
+            'scheduler_config': scheduler_config,
+            'model_state_dict': self.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict() if optimizer else None,
+            'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
+            'loss': loss,
+        }, filepath)
+
+        return filepath
+
+    @classmethod
+    def load_from_checkpoint(cls, checkpoint_path, device="cuda"):
+        """Class method to create and load a model from checkpoint."""
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+
+        # Create model instance from saved config
+        model = cls(**checkpoint['model_config']).to(device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+
+        # Create optimizer with saved config
+        optimizer = optim.Adam(
+            model.parameters(),
+            lr=checkpoint['optimizer_config']['lr'],
+            weight_decay=checkpoint['optimizer_config']['weight_decay']
+        )
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        # Create scheduler with saved config
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=checkpoint['scheduler_config']['T_max'],
+            eta_min=checkpoint['scheduler_config']['eta_min']
+        )
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+
+        return model, optimizer, scheduler, checkpoint['epoch'], checkpoint['loss']
+
+    def process_policy_output(self, policy_out, pass_logit, legal_moves_mask=None):
+        policy_out = policy_out.view(
+            policy_out.size(0), -1)  # Flatten to (batch, H*W)
+        combined_policy = torch.cat(
+            [policy_out, pass_logit.unsqueeze(-1)], dim=1)
+
+        if legal_moves_mask is not None:
+            # Flatten the legal moves mask and add the pass move (always legal)
+            legal_moves_mask = legal_moves_mask.view(
+                legal_moves_mask.size(0), -1)
+            pass_mask = torch.ones_like(pass_logit.unsqueeze(-1))
+            full_mask = torch.cat([legal_moves_mask, pass_mask], dim=1)
+
+            # Set illegal moves to -inf
+            combined_policy = torch.where(
+                full_mask == 1,
+                combined_policy,
+                torch.tensor(float('-inf')).to(combined_policy.device)
+            )
+
+        return combined_policy
 
 
 def main():
@@ -190,9 +256,9 @@ def main():
     model = GoNet(
         num_input_planes=go_data_gen.Board.num_feature_planes,
         num_input_features=go_data_gen.Board.num_feature_scalars,
-        channels=64,
-        num_blocks=4,
-        c_head=32
+        channels=128,
+        num_blocks=6,
+        c_head=50
     )
 
     # Print model summary
