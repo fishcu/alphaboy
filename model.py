@@ -172,21 +172,31 @@ class GoNet(nn.Module):
         model_config = {
             'num_input_planes': self.input_process.spatial_conv.in_channels,
             'num_input_features': self.input_process.scalar_linear.in_features,
-            'channels': self.input_process.spatial_conv.out_channels,  # Direct channel count
+            'channels': self.input_process.spatial_conv.out_channels,
             'num_blocks': len(self.blocks),
-            'c_head': self.shared_fc.out_features  # Use shared head dimension
+            'c_head': self.shared_fc.out_features
         }
 
-        # Extract optimizer and scheduler configs
+        # Extract optimizer config
         optimizer_config = {
             'lr': optimizer.param_groups[0]['lr'],
             'weight_decay': optimizer.param_groups[0]['weight_decay']
         }
 
-        scheduler_config = {
-            'T_max': scheduler.T_max,
-            'eta_min': scheduler.eta_min
-        }
+        # Extract scheduler config based on scheduler type
+        scheduler_config = {}
+        if isinstance(scheduler, optim.lr_scheduler.CosineAnnealingLR):
+            scheduler_config = {
+                'type': 'CosineAnnealingLR',
+                'T_max': scheduler.T_max,
+                'eta_min': scheduler.eta_min
+            }
+        elif isinstance(scheduler, optim.lr_scheduler.MultiStepLR):
+            scheduler_config = {
+                'type': 'MultiStepLR',
+                'milestones': scheduler.milestones,
+                'gamma': scheduler.gamma
+            }
 
         torch.save({
             'epoch': epoch,
@@ -218,12 +228,21 @@ class GoNet(nn.Module):
         )
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-        # Create scheduler with saved config
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=checkpoint['scheduler_config']['T_max'],
-            eta_min=checkpoint['scheduler_config']['eta_min']
-        )
+        # Create scheduler based on saved type
+        scheduler_config = checkpoint['scheduler_config']
+        if scheduler_config['type'] == 'CosineAnnealingLR':
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=scheduler_config['T_max'],
+                eta_min=scheduler_config['eta_min']
+            )
+        elif scheduler_config['type'] == 'MultiStepLR':
+            scheduler = optim.lr_scheduler.MultiStepLR(
+                optimizer,
+                milestones=scheduler_config['milestones'],
+                gamma=scheduler_config['gamma']
+            )
+
         scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
         return model, optimizer, scheduler, checkpoint['epoch'], checkpoint['loss']
