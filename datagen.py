@@ -35,11 +35,16 @@ class GoDataGenerator:
                 0, len(self.sgf_files) - 1)]
 
             try:
-                board, moves, result = go_data_gen.load_sgf(sgf_file)
-                play_idx = random.randint(0, len(moves) - 2)
-                next_play_idx = play_idx + 1
+                is_valid, board, moves, result = go_data_gen.load_sgf(sgf_file)
 
-                # Play moves up to the current position
+                # Skip invalid SGF files silently
+                if not is_valid:
+                    continue
+
+                # Randomly select the next move to predict
+                next_play_idx = random.randint(0, len(moves) - 1)
+
+                # Play moves up to the current position (all moves before next_play_idx)
                 for move in moves[:next_play_idx]:
                     board.play(move)
 
@@ -57,15 +62,13 @@ class GoDataGenerator:
                 scalar_features = torch.from_numpy(
                     board.get_feature_scalars(to_play))
 
-                # Create policy target - index of next move
-                # Scalar tensor instead of size [1]
-                policy = torch.tensor(0, dtype=torch.long)
                 next_move = moves[next_play_idx]
+
+                # Create policy tensor
+                policy = torch.tensor(0, dtype=torch.long)
                 if next_move.is_pass:
-                    # Last index represents pass
                     policy = torch.tensor(board.data_size * board.data_size)
                 else:
-                    # Add padding to convert board coordinates to memory coordinates
                     mem_x = next_move.coord.x + board.padding
                     mem_y = next_move.coord.y + board.padding
                     move_idx = mem_y * board.data_size + mem_x
@@ -79,19 +82,6 @@ class GoDataGenerator:
                 elif result < 0:  # Win for White
                     value = torch.tensor(
                         1.0 if to_play == go_data_gen.Color.White else 0.0, dtype=torch.float32)
-
-                if self.debug:
-                    print("\nPolicy as board position:")
-                    policy_grid = torch.zeros(
-                        board.data_size * board.data_size + 1)
-                    # Set the chosen move to 1.0
-                    policy_grid[policy.item()] = 1.0
-                    policy_grid = policy_grid[:-
-                                              1].reshape(board.data_size, board.data_size)
-                    print(policy_grid.numpy())
-                    print(
-                        f"Pass move selected: {policy.item() == board.data_size * board.data_size}")
-                    print(f"\nValue target: {value.item():.1f}")
 
                 spatial_data.append(spatial_features)
                 scalar_data.append(scalar_features)

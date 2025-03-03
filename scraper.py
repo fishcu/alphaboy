@@ -6,15 +6,15 @@ from datetime import date, timedelta
 
 # Set the base URL and date range
 base_url = "https://katagoarchive.org/kata1/traininggames/"
-start_date = date(2025, 1, 1)
-end_date = date(2025, 2, 13)
+start_date = date(2024, 5, 1)
+end_date = date(2024, 8, 31)
 
 # Set the cooldown time in seconds between requests
 cooldown_time = 1
 
 # Create a directory to store the extracted files
 script_dir = os.path.dirname(os.path.abspath(__file__))
-output_dir = os.path.join(script_dir, "data")
+output_dir = os.path.join(script_dir, "data/train")
 os.makedirs(output_dir, exist_ok=True)
 
 # Iterate over the dates in December 2023
@@ -46,7 +46,7 @@ while current_date <= end_date:
         
         print(f"Successfully downloaded and extracted files for {current_date}")
     else:
-        print(f"Failed to download files for {current_date}")
+        print(f"FAILED to download files for {current_date}")
     
     # Increment the current date
     current_date += timedelta(days=1)

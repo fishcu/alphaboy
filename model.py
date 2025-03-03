@@ -11,6 +11,17 @@ import go_data_gen
 
 from datagen import GoDataGenerator
 
+import random
+
+
+class Swish(nn.Module):
+    def __init__(self, beta=1.0):
+        super(Swish, self).__init__()
+        self.beta = beta
+
+    def forward(self, x):
+        return x * torch.sigmoid(self.beta * x)
+
 
 class NestedBottleneckBlock(nn.Module):
     """
@@ -48,7 +59,7 @@ class NestedBottleneckBlock(nn.Module):
         self.conv6 = nn.Conv2d(half_channels, channels,
                                kernel_size=1, bias=False)
 
-        self.act = nn.ReLU(inplace=True)
+        self.act = Swish()
 
     def forward(self, x):
         identity = x
@@ -96,7 +107,7 @@ class GoNet(nn.Module):
         ])
         self.trunk_final = nn.Sequential(
             nn.BatchNorm2d(channels),
-            nn.ReLU(inplace=True)
+            Swish()
         )
 
         # Policy head for board moves
@@ -104,7 +115,7 @@ class GoNet(nn.Module):
 
         # Shared processing for pass and value
         self.shared_fc = nn.Linear(channels, c_head)
-        self.shared_act = nn.ReLU()
+        self.shared_act = Swish()
 
         # Combined pass and value head
         # 2 outputs: pass logit and value
@@ -179,23 +190,32 @@ class GoNet(nn.Module):
 
         # Extract optimizer config
         optimizer_config = {
+            'type': 'AdamW',
             'lr': optimizer.param_groups[0]['lr'],
             'weight_decay': optimizer.param_groups[0]['weight_decay']
         }
 
-        # Extract scheduler config based on scheduler type
+        # Extract scheduler config
         scheduler_config = {}
-        if isinstance(scheduler, optim.lr_scheduler.CosineAnnealingLR):
+        if isinstance(scheduler, torch.optim.lr_scheduler.SequentialLR):
+            # Handle the warmup + cosine scheduler
+            warmup_epochs = getattr(scheduler, 'warmup_epochs', scheduler._milestones[0])
+            scheduler_config = {
+                'type': 'SequentialLR',
+                'warmup_epochs': warmup_epochs,
+                'total_epochs': scheduler._schedulers[1].T_max + warmup_epochs,
+                'initial_lr': optimizer_config['lr'],
+                'final_lr': scheduler._schedulers[1].eta_min
+            }
+        elif isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR):
             scheduler_config = {
                 'type': 'CosineAnnealingLR',
                 'T_max': scheduler.T_max,
                 'eta_min': scheduler.eta_min
             }
-        elif isinstance(scheduler, optim.lr_scheduler.MultiStepLR):
+        else:
             scheduler_config = {
-                'type': 'MultiStepLR',
-                'milestones': scheduler.milestones,
-                'gamma': scheduler.gamma
+                'type': str(type(scheduler).__name__)
             }
 
         torch.save({
@@ -221,7 +241,7 @@ class GoNet(nn.Module):
         model.load_state_dict(checkpoint['model_state_dict'])
 
         # Create optimizer with saved config
-        optimizer = optim.Adam(
+        optimizer = optim.AdamW(
             model.parameters(),
             lr=checkpoint['optimizer_config']['lr'],
             weight_decay=checkpoint['optimizer_config']['weight_decay']
@@ -236,14 +256,22 @@ class GoNet(nn.Module):
                 T_max=scheduler_config['T_max'],
                 eta_min=scheduler_config['eta_min']
             )
-        elif scheduler_config['type'] == 'MultiStepLR':
-            scheduler = optim.lr_scheduler.MultiStepLR(
+        else:
+            # For backward compatibility, convert any other scheduler to CosineAnnealingLR
+            print(f"Converting {scheduler_config['type']} to CosineAnnealingLR")
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
-                milestones=scheduler_config['milestones'],
-                gamma=scheduler_config['gamma']
+                T_max=200,  # Default to 200 epochs
+                eta_min=0.00001  # Default final learning rate
             )
 
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        # Load scheduler state if available
+        if 'scheduler_state_dict' in checkpoint:
+            try:
+                scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            except Exception as e:
+                print(f"Warning: Could not load scheduler state: {e}")
+                print("Continuing with freshly initialized scheduler")
 
         return model, optimizer, scheduler, checkpoint['epoch'], checkpoint['loss']
 
@@ -271,6 +299,8 @@ class GoNet(nn.Module):
 
 
 def main():
+    random.seed(42)
+
     # Initialize model
     model = GoNet(
         num_input_planes=go_data_gen.Board.num_feature_planes,

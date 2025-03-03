@@ -13,6 +13,8 @@ import go_data_gen
 from datagen import GoDataGenerator
 from model import GoNet
 
+import random
+
 
 def train_epoch(data_generator, model, batch_size, steps_per_epoch, optimizer, scheduler, device):
     model.train()
@@ -194,13 +196,19 @@ def validate_single_move(model, spatial_batch, scalar_batch, value_batch, data_g
 
 
 def main():
+    # Fix random seed
+    random.seed(42)
+    torch.manual_seed(42)
+
     # Training parameters
     steps_per_epoch = 1000
     num_epochs = 200
+    warmup_epochs = 10
     batch_size = 128
-    initial_learning_rate = 0.005
-    # final_learning_rate = 0.00001
+    initial_learning_rate = 0.001
+    final_learning_rate = 0.00001
     validation_size = 6400
+    weight_decay = 0.0001
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     save_dir = './checkpoints'
@@ -233,21 +241,15 @@ def main():
             c_head=32
         ).to(device)
 
-        optimizer = optim.Adam(
-            model.parameters(), lr=initial_learning_rate, weight_decay=1e-4)
+        # Initialize optimizer with the initial learning rate
+        optimizer = optim.AdamW(
+            model.parameters(), lr=initial_learning_rate, weight_decay=weight_decay)
 
-        # scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        #     optimizer,
-        #     T_max=num_epochs,  # Total number of epochs
-        #     eta_min=final_learning_rate  # Final learning rate
-        # )
-        # Define milestones and gamma for StepLR
-        milestones = [100, 150]  # Epochs where learning rate changes
-        gamma = 0.1  # Factor to multiply learning rate by at each milestone
-        scheduler = optim.lr_scheduler.MultiStepLR(
+        # Create cosine annealing scheduler
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
-            milestones=milestones,
-            gamma=gamma
+            T_max=num_epochs,
+            eta_min=final_learning_rate
         )
 
     # Initialize data generators
