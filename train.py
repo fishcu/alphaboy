@@ -236,8 +236,8 @@ def main():
         model = GoNet(
             num_input_planes=go_data_gen.Board.num_feature_planes,
             num_input_features=go_data_gen.Board.num_feature_scalars,
-            channels=128,
-            num_blocks=6,
+            channels=96,
+            num_blocks=12,
             c_head=32
         ).to(device)
 

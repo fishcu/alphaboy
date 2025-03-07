@@ -1,30 +1,12 @@
 import argparse
 import torch
-import torch.nn.functional as F
 import random
 
 import go_data_gen
-from model import GoNet
+from model import GoNet, predict_move
 
 
-def sample_move(policy_probs, temperature=1.0):
-    """
-    Sample a move from the policy distribution using temperature scaling.
-    Higher temperature = more randomness, lower = more deterministic.
-    At temperature=0, this is equivalent to taking argmax.
-    """
-    if temperature == 0:
-        return torch.argmax(policy_probs).item()
-
-    # Apply temperature scaling
-    logits = torch.log(policy_probs)
-    scaled_probs = F.softmax(logits / temperature, dim=0)
-
-    # Sample from the distribution
-    return torch.multinomial(scaled_probs, 1).item()
-
-
-def play_game(model, device, temperature=0.5, max_moves=200):
+def play_game(model, device, temperature=0.01, max_moves=200):
     # Initialize board
     board = go_data_gen.Board(go_data_gen.Vec2(19, 19), 7.5)
     current_color = go_data_gen.Color.Black
@@ -35,38 +17,16 @@ def play_game(model, device, temperature=0.5, max_moves=200):
     board.print()
 
     while move_count < max_moves and consecutive_passes < 2:
-        # Get input features for current position
-        spatial_features = torch.from_numpy(
-            board.get_feature_planes(current_color))
-        scalar_features = torch.from_numpy(
-            board.get_feature_scalars(current_color))
+        # Use the predict_move function to get the next move and value
+        pred_move, value = predict_move(
+            model, board, current_color, device, temperature)
 
-        # Add batch dimension and move to device
-        spatial_features = spatial_features.unsqueeze(0).to(device)
-        scalar_features = scalar_features.unsqueeze(0).to(device)
-
-        # Get model predictions
-        with torch.no_grad():
-            combined_policy, value = model(spatial_features, scalar_features)
-            policy_probs = F.softmax(combined_policy, dim=1)[0]
-
-        # Sample move from policy distribution
-        max_idx = sample_move(policy_probs, temperature)
-        pass_idx = board.data_size * board.data_size
-
-        # Create the move
-        if max_idx == pass_idx:  # Pass move index
-            pred_move = go_data_gen.Move(
-                current_color, True, go_data_gen.Vec2(0, 0))
+        # Check if the move is a pass
+        if pred_move.is_pass:
             print(f"\n{current_color.name} plays: PASS")
             consecutive_passes += 1
         else:
-            mem_y = max_idx // board.data_size
-            mem_x = max_idx % board.data_size
-            x = mem_x - board.padding
-            y = mem_y - board.padding
-            pred_move = go_data_gen.Move(
-                current_color, False, go_data_gen.Vec2(x, y))
+            x, y = pred_move.coord.x, pred_move.coord.y
             print(f"\n{current_color.name} plays: ({x}, {y})")
             consecutive_passes = 0
 
@@ -75,8 +35,8 @@ def play_game(model, device, temperature=0.5, max_moves=200):
         print(f"Move {move_count + 1}:")
         board.print()
 
-        # Print current position evaluation
-        print(f"Position evaluation: {torch.sigmoid(value[0]).item():.3f}")
+        # Print current position evaluation using the value returned from predict_move
+        print(f"Position evaluation: {torch.sigmoid(value).item():.3f}")
 
         move_count += 1
         current_color = go_data_gen.opposite(current_color)

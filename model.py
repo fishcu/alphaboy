@@ -23,14 +23,77 @@ class Swish(nn.Module):
         return x * torch.sigmoid(self.beta * x)
 
 
-class NestedBottleneckBlock(nn.Module):
+class MobileNetBottleneckBlock(nn.Module):
+    """
+    Implementation of a MobileNet-style bottleneck block with depthwise separable convolutions.
+    """
+
+    def __init__(self, squeeze_channels=64, expand_channels=256):
+        super(MobileNetBottleneckBlock, self).__init__()
+
+        # Expansion phase (1x1 conv)
+        self.conv1 = nn.Conv2d(
+            in_channels=squeeze_channels,
+            out_channels=expand_channels,
+            kernel_size=1,
+            bias=False
+        )
+        self.bn1 = nn.BatchNorm2d(expand_channels)
+
+        # Depthwise phase (3x3 depthwise conv)
+        self.depthwise = nn.Conv2d(
+            in_channels=expand_channels,
+            out_channels=expand_channels,
+            kernel_size=3,
+            padding=1,
+            groups=expand_channels,  # This makes it a depthwise convolution
+            bias=False
+        )
+        self.bn2 = nn.BatchNorm2d(expand_channels)
+
+        # Projection phase (1x1 conv)
+        self.conv2 = nn.Conv2d(
+            in_channels=expand_channels,
+            out_channels=squeeze_channels,  # Project back to input channels
+            kernel_size=1,
+            bias=False
+        )
+        self.bn3 = nn.BatchNorm2d(squeeze_channels)
+
+        # Activation function
+        self.activation = Swish()
+
+    def forward(self, x):
+        identity = x
+
+        # Expansion
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.activation(out)
+
+        # Depthwise
+        out = self.depthwise(out)
+        out = self.bn2(out)
+        out = self.activation(out)
+
+        # Projection
+        out = self.conv2(out)
+        out = self.bn3(out)
+
+        # Skip connection (always used since in_channels == out_channels)
+        out = out + identity
+
+        return out
+
+
+class KataGoBlock(nn.Module):
     """
         Implementation of "nested bottleneck residual nets" as depicted in
         https://raw.githubusercontent.com/lightvector/KataGo/master/images/docs/bottlenecknestedresblock.png
     """
 
     def __init__(self, channels: int):
-        super(NestedBottleneckBlock, self).__init__()
+        super(KataGoBlock, self).__init__()
         half_channels = channels // 2
 
         # Main branch (1x1 conv)
@@ -98,24 +161,28 @@ class GoNet(nn.Module):
             'scalar_linear': nn.Linear(
                 in_features=num_input_features,
                 out_features=channels
-            )
+            ),
+            'bn': nn.BatchNorm2d(channels)
         })
+
+        self.activation = Swish()
 
         # Trunk
         self.blocks = nn.ModuleList([
-            NestedBottleneckBlock(channels) for _ in range(num_blocks)
+            MobileNetBottleneckBlock(channels, channels * 4) for _ in range(num_blocks)
         ])
-        self.trunk_final = nn.Sequential(
-            nn.BatchNorm2d(channels),
-            Swish()
-        )
+        # self.trunk_final = nn.Sequential(
+        #     nn.BatchNorm2d(channels),
+        #     self.activation
+        # )
+        self.trunk_final = self.activation
 
         # Policy head for board moves
         self.policy_conv = nn.Conv2d(channels, 1, kernel_size=1)
 
         # Shared processing for pass and value
         self.shared_fc = nn.Linear(channels, c_head)
-        self.shared_act = Swish()
+        self.shared_act = self.activation
 
         # Combined pass and value head
         # 2 outputs: pass logit and value
@@ -141,6 +208,7 @@ class GoNet(nn.Module):
 
         # Combine features
         x = spatial_features + scalar_features  # [N, C_out, H, W]
+        x = self.activation(self.input_process.bn(x))
 
         # Process through trunk
         for block in self.blocks:
@@ -170,13 +238,128 @@ class GoNet(nn.Module):
 
         return combined_policy, value
 
+    # def save_checkpoint(self, optimizer, scheduler, epoch, loss, save_dir):
+    #     """Save model checkpoint including optimizer and scheduler states."""
+    #     if not os.path.exists(save_dir):
+    #         os.makedirs(save_dir)
+
+    #     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    #     filename = f'model_epoch{epoch}_{timestamp}.pt'
+    #     filepath = os.path.join(save_dir, filename)
+
+    #     # Save model hyperparameters
+    #     model_config = {
+    #         'num_input_planes': self.input_process.spatial_conv.in_channels,
+    #         'num_input_features': self.input_process.scalar_linear.in_features,
+    #         'channels': self.input_process.spatial_conv.out_channels,
+    #         'num_blocks': len(self.blocks),
+    #         'c_head': self.shared_fc.out_features
+    #     }
+
+    #     # Extract optimizer config
+    #     optimizer_config = {
+    #         'type': type(optimizer).__name__,  # Store the actual optimizer type
+    #         'lr': optimizer.param_groups[0]['lr'],
+    #         'weight_decay': optimizer.param_groups[0]['weight_decay']
+    #     }
+
+    #     # Extract scheduler config
+    #     scheduler_config = {}
+    #     if isinstance(scheduler, torch.optim.lr_scheduler.SequentialLR):
+    #         # Handle the warmup + cosine scheduler
+    #         warmup_epochs = getattr(scheduler, 'warmup_epochs', scheduler._milestones[0])
+    #         scheduler_config = {
+    #             'type': 'SequentialLR',
+    #             'warmup_epochs': warmup_epochs,
+    #             'total_epochs': scheduler._schedulers[1].T_max + warmup_epochs,
+    #             'initial_lr': optimizer_config['lr'],
+    #             'final_lr': scheduler._schedulers[1].eta_min
+    #         }
+    #     elif isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR):
+    #         scheduler_config = {
+    #             'type': 'CosineAnnealingLR',
+    #             'T_max': scheduler.T_max,
+    #             'eta_min': scheduler.eta_min
+    #         }
+    #     else:
+    #         scheduler_config = {
+    #             'type': str(type(scheduler).__name__)
+    #         }
+
+    #     torch.save({
+    #         'epoch': epoch,
+    #         'model_config': model_config,
+    #         'optimizer_config': optimizer_config,
+    #         'scheduler_config': scheduler_config,
+    #         'model_state_dict': self.state_dict(),
+    #         'optimizer_state_dict': optimizer.state_dict() if optimizer else None,
+    #         'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
+    #         'loss': loss,
+    #     }, filepath)
+
+    #     return filepath
+
+    # @classmethod
+    # def load_from_checkpoint(cls, checkpoint_path, device="cuda"):
+    #     """Class method to create and load a model from checkpoint."""
+    #     checkpoint = torch.load(checkpoint_path, map_location=device)
+
+    #     # Create model instance from saved config
+    #     model = cls(**checkpoint['model_config']).to(device)
+    #     model.load_state_dict(checkpoint['model_state_dict'])
+
+    #     # Create optimizer based on saved config
+    #     optimizer_config = checkpoint['optimizer_config']
+    #     # Always use AdamW regardless of what was saved in the checkpoint
+    #     optimizer = optim.AdamW(
+    #         model.parameters(),
+    #         lr=optimizer_config['lr'],
+    #         weight_decay=optimizer_config['weight_decay']
+    #     )
+
+    #     # Load optimizer state if available
+    #     if 'optimizer_state_dict' in checkpoint and checkpoint['optimizer_state_dict']:
+    #         try:
+    #             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    #         except Exception as e:
+    #             print(f"Warning: Could not load optimizer state: {e}")
+    #             print("Continuing with freshly initialized optimizer")
+
+    #     # Create scheduler based on saved type
+    #     scheduler_config = checkpoint['scheduler_config']
+    #     if scheduler_config['type'] == 'CosineAnnealingLR':
+    #         scheduler = optim.lr_scheduler.CosineAnnealingLR(
+    #             optimizer,
+    #             T_max=scheduler_config['T_max'],
+    #             eta_min=scheduler_config['eta_min']
+    #         )
+    #     else:
+    #         # For backward compatibility, convert any other scheduler to CosineAnnealingLR
+    #         print(f"Converting {scheduler_config['type']} to CosineAnnealingLR")
+    #         scheduler = optim.lr_scheduler.CosineAnnealingLR(
+    #             optimizer,
+    #             T_max=200,  # Default to 200 epochs
+    #             eta_min=0.00001  # Default final learning rate
+    #         )
+
+    #     # Load scheduler state if available
+    #     if 'scheduler_state_dict' in checkpoint:
+    #         try:
+    #             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+    #         except Exception as e:
+    #             print(f"Warning: Could not load scheduler state: {e}")
+    #             print("Continuing with freshly initialized scheduler")
+
+    #     return model, optimizer, scheduler, checkpoint['epoch'], checkpoint['loss']
+
+    # New implementations for MobileNetBottleneckBlock
     def save_checkpoint(self, optimizer, scheduler, epoch, loss, save_dir):
         """Save model checkpoint including optimizer and scheduler states."""
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f'model_epoch{epoch}_{timestamp}.pt'
+        filename = f'mobilenet_model_epoch{epoch}_{timestamp}.pt'
         filepath = os.path.join(save_dir, filename)
 
         # Save model hyperparameters
@@ -190,33 +373,17 @@ class GoNet(nn.Module):
 
         # Extract optimizer config
         optimizer_config = {
-            'type': 'AdamW',
+            'type': type(optimizer).__name__,
             'lr': optimizer.param_groups[0]['lr'],
             'weight_decay': optimizer.param_groups[0]['weight_decay']
         }
 
-        # Extract scheduler config
-        scheduler_config = {}
-        if isinstance(scheduler, torch.optim.lr_scheduler.SequentialLR):
-            # Handle the warmup + cosine scheduler
-            warmup_epochs = getattr(scheduler, 'warmup_epochs', scheduler._milestones[0])
-            scheduler_config = {
-                'type': 'SequentialLR',
-                'warmup_epochs': warmup_epochs,
-                'total_epochs': scheduler._schedulers[1].T_max + warmup_epochs,
-                'initial_lr': optimizer_config['lr'],
-                'final_lr': scheduler._schedulers[1].eta_min
-            }
-        elif isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR):
-            scheduler_config = {
-                'type': 'CosineAnnealingLR',
-                'T_max': scheduler.T_max,
-                'eta_min': scheduler.eta_min
-            }
-        else:
-            scheduler_config = {
-                'type': str(type(scheduler).__name__)
-            }
+        # Extract scheduler config - only support CosineAnnealingLR
+        scheduler_config = {
+            'type': 'CosineAnnealingLR',
+            'T_max': scheduler.T_max,
+            'eta_min': scheduler.eta_min
+        }
 
         torch.save({
             'epoch': epoch,
@@ -229,46 +396,61 @@ class GoNet(nn.Module):
             'loss': loss,
         }, filepath)
 
+        print(f"MobileNet model checkpoint saved to {filepath}")
         return filepath
 
     @classmethod
     def load_from_checkpoint(cls, checkpoint_path, device="cuda"):
         """Class method to create and load a model from checkpoint."""
+        print(f"Loading model from {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, map_location=device)
 
         # Create model instance from saved config
         model = cls(**checkpoint['model_config']).to(device)
-        model.load_state_dict(checkpoint['model_state_dict'])
 
-        # Create optimizer with saved config
+        # Try to load state dict
+        try:
+            model.load_state_dict(checkpoint['model_state_dict'])
+            print("Model state loaded successfully")
+        except Exception as e:
+            print(f"Warning: Could not load model state directly: {e}")
+            print("Attempting to load with strict=False to handle structure changes...")
+            missing_keys, unexpected_keys = model.load_state_dict(
+                checkpoint['model_state_dict'], strict=False
+            )
+            print(
+                f"Model loaded with {len(missing_keys)} missing and {len(unexpected_keys)} unexpected keys")
+
+        # Create optimizer based on saved config
+        optimizer_config = checkpoint['optimizer_config']
         optimizer = optim.AdamW(
             model.parameters(),
-            lr=checkpoint['optimizer_config']['lr'],
-            weight_decay=checkpoint['optimizer_config']['weight_decay']
+            lr=optimizer_config['lr'],
+            weight_decay=optimizer_config['weight_decay']
         )
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-        # Create scheduler based on saved type
+        # Load optimizer state if available
+        if 'optimizer_state_dict' in checkpoint and checkpoint['optimizer_state_dict']:
+            try:
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                print("Optimizer state loaded successfully")
+            except Exception as e:
+                print(f"Warning: Could not load optimizer state: {e}")
+                print("Continuing with freshly initialized optimizer")
+
+        # Create scheduler - only support CosineAnnealingLR
         scheduler_config = checkpoint['scheduler_config']
-        if scheduler_config['type'] == 'CosineAnnealingLR':
-            scheduler = optim.lr_scheduler.CosineAnnealingLR(
-                optimizer,
-                T_max=scheduler_config['T_max'],
-                eta_min=scheduler_config['eta_min']
-            )
-        else:
-            # For backward compatibility, convert any other scheduler to CosineAnnealingLR
-            print(f"Converting {scheduler_config['type']} to CosineAnnealingLR")
-            scheduler = optim.lr_scheduler.CosineAnnealingLR(
-                optimizer,
-                T_max=200,  # Default to 200 epochs
-                eta_min=0.00001  # Default final learning rate
-            )
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=scheduler_config.get('T_max', 100),
+            eta_min=scheduler_config.get('eta_min', 1e-5)
+        )
 
         # Load scheduler state if available
         if 'scheduler_state_dict' in checkpoint:
             try:
                 scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                print("Scheduler state loaded successfully")
             except Exception as e:
                 print(f"Warning: Could not load scheduler state: {e}")
                 print("Continuing with freshly initialized scheduler")
@@ -298,6 +480,67 @@ class GoNet(nn.Module):
         return combined_policy
 
 
+def predict_move(model, board, color, device="cuda", temperature=0.01, allow_pass=True):
+    """
+    Predict a move for the given board position and color using the model.
+    
+    Args:
+        model: The neural network model to use for prediction
+        board: The current board state (go_data_gen.Board)
+        color: The color to play (go_data_gen.Color)
+        device: The device to run inference on ("cuda" or "cpu")
+        temperature: Temperature for move sampling (0=deterministic, higher=more random)
+        allow_pass: Whether to allow pass moves (set to False for handicap placement)
+    
+    Returns:
+        tuple: (go_data_gen.Move, float) - The predicted move and the value prediction
+    """
+    # Get input features for current position
+    spatial_features = torch.from_numpy(board.get_feature_planes(color))
+    scalar_features = torch.from_numpy(board.get_feature_scalars(color))
+
+    # Add batch dimension and move to device
+    spatial_features = spatial_features.unsqueeze(0).to(device)
+    scalar_features = scalar_features.unsqueeze(0).to(device)
+
+    # Get model predictions
+    with torch.no_grad():
+        combined_policy, value = model(spatial_features, scalar_features)
+        
+        # If pass is not allowed, set the pass logit to a very negative value
+        if not allow_pass:
+            pass_idx = board.data_size * board.data_size
+            combined_policy[0, pass_idx] = float('-inf')
+        
+        # Apply softmax to get probabilities
+        policy_probs = F.softmax(combined_policy, dim=1)[0]
+
+    # Sample move from policy distribution
+    if temperature == 0:
+        max_idx = torch.argmax(policy_probs).item()
+    else:
+        # Apply temperature scaling
+        logits = torch.log(policy_probs)
+        scaled_probs = F.softmax(logits / temperature, dim=0)
+        # Sample from the distribution
+        max_idx = torch.multinomial(scaled_probs, 1).item()
+
+    pass_idx = board.data_size * board.data_size
+
+    # Create the move
+    if max_idx == pass_idx:  # Pass move index
+        move = go_data_gen.Move(color, True, go_data_gen.Vec2(0, 0))
+    else:
+        mem_y = max_idx // board.data_size
+        mem_x = max_idx % board.data_size
+        x = mem_x - board.padding
+        y = mem_y - board.padding
+        move = go_data_gen.Move(color, False, go_data_gen.Vec2(x, y))
+    
+    # Return both the move and the value
+    return move, value[0]
+
+
 def main():
     random.seed(42)
 
@@ -305,9 +548,9 @@ def main():
     model = GoNet(
         num_input_planes=go_data_gen.Board.num_feature_planes,
         num_input_features=go_data_gen.Board.num_feature_scalars,
-        channels=128,
-        num_blocks=6,
-        c_head=50
+        channels=96,
+        num_blocks=12,
+        c_head=32
     )
 
     # Print model summary

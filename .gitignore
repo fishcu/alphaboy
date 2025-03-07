@@ -1,5 +1,6 @@
 data/*
 runs/*
+runs_old/*
 checkpoints/*
 
 __pycache__
