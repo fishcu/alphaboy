@@ -402,7 +402,6 @@ class GoNet(nn.Module):
     @classmethod
     def load_from_checkpoint(cls, checkpoint_path, device="cuda"):
         """Class method to create and load a model from checkpoint."""
-        print(f"Loading model from {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, map_location=device)
 
         # Create model instance from saved config
@@ -411,7 +410,6 @@ class GoNet(nn.Module):
         # Try to load state dict
         try:
             model.load_state_dict(checkpoint['model_state_dict'])
-            print("Model state loaded successfully")
         except Exception as e:
             print(f"Warning: Could not load model state directly: {e}")
             print("Attempting to load with strict=False to handle structure changes...")
@@ -433,7 +431,6 @@ class GoNet(nn.Module):
         if 'optimizer_state_dict' in checkpoint and checkpoint['optimizer_state_dict']:
             try:
                 optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                print("Optimizer state loaded successfully")
             except Exception as e:
                 print(f"Warning: Could not load optimizer state: {e}")
                 print("Continuing with freshly initialized optimizer")
@@ -450,7 +447,6 @@ class GoNet(nn.Module):
         if 'scheduler_state_dict' in checkpoint:
             try:
                 scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-                print("Scheduler state loaded successfully")
             except Exception as e:
                 print(f"Warning: Could not load scheduler state: {e}")
                 print("Continuing with freshly initialized scheduler")
