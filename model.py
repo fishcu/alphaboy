@@ -43,103 +43,6 @@ class SEBlock(nn.Module):
         return x * y
 
 
-class ShuffleNetBlock(nn.Module):
-    """
-    Implementation of a ShuffleNet block based on the original publication.
-    Features:
-    - Group convolutions for the 1x1 convolutions
-    - Channel shuffle operation
-    - Depthwise separable convolution
-    - Residual connection
-    """
-
-    def __init__(self, squeeze_channels=64, expand_channels=256, groups=4):
-        super(ShuffleNetBlock, self).__init__()
-
-        # Ensure that expand_channels is divisible by groups
-        assert expand_channels % groups == 0, "Expand channels must be divisible by groups"
-
-        # First 1x1 grouped convolution for bottleneck
-        self.conv1 = nn.Conv2d(
-            in_channels=squeeze_channels,
-            out_channels=expand_channels,
-            kernel_size=1,
-            groups=groups,
-            bias=False
-        )
-        self.bn1 = nn.BatchNorm2d(expand_channels)
-        self.swish1 = Swish()
-
-        # Channel shuffle operation
-        self.groups = groups
-
-        # Depthwise 3x3 convolution
-        self.conv2 = nn.Conv2d(
-            in_channels=expand_channels,
-            out_channels=expand_channels,
-            kernel_size=3,
-            padding=1,
-            groups=expand_channels,  # Depthwise convolution
-            bias=False
-        )
-        self.bn2 = nn.BatchNorm2d(expand_channels)
-
-        # Second 1x1 grouped convolution to restore channel dimension
-        self.conv3 = nn.Conv2d(
-            in_channels=expand_channels,
-            out_channels=squeeze_channels,
-            kernel_size=1,
-            groups=groups,
-            bias=False
-        )
-        self.bn3 = nn.BatchNorm2d(squeeze_channels)
-
-        # Final activation
-        self.swish2 = Swish()
-
-    def _channel_shuffle(self, x):
-        batch_size, channels, height, width = x.size()
-        channels_per_group = channels // self.groups
-
-        # Reshape
-        x = x.view(batch_size, self.groups, channels_per_group, height, width)
-
-        # Transpose
-        x = x.transpose(1, 2).contiguous()
-
-        # Flatten
-        x = x.view(batch_size, -1, height, width)
-
-        return x
-
-    def forward(self, x):
-        residual = x
-
-        # Bottleneck
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.swish1(out)
-
-        # Channel shuffle
-        out = self._channel_shuffle(out)
-
-        # Depthwise convolution
-        out = self.conv2(out)
-        out = self.bn2(out)
-
-        # Pointwise convolution
-        out = self.conv3(out)
-        out = self.bn3(out)
-
-        # Residual connection
-        out = out + residual
-
-        # Final activation
-        out = self.swish2(out)
-
-        return out
-
-
 def channel_shuffle(x, groups):
     """
     Rearranges channels of the input tensor by dividing into groups and then transposing.
@@ -164,34 +67,42 @@ def channel_shuffle(x, groups):
 
 class ShuffleNetBlockV2(nn.Module):
     """
-    A simplified ShuffleNetV2 block supporting only the stride=1 variant.
+    A modified ShuffleNetV2 block incorporating the inverted bottleneck approach from MobileNetV2.
 
     The input is split equally along the channel dimension into two halves. 
     The first half is left unchanged, while the second half is processed by:
-      1. A 1×1 convolution followed by BatchNorm and ReLU.
-      2. A depthwise 3×3 convolution with padding=1.
-      3. A second 1×1 convolution followed by BatchNorm and ReLU.
+      1. A 1×1 convolution that expands the channels (expansion factor).
+      2. A depthwise 3×3 convolution with the expanded channels.
+      3. A 1×1 convolution that projects back to the original channel count.
 
+    Each convolution is followed by BatchNorm and Swish activation.
     Finally, the two branches are concatenated and a channel shuffle is applied.
 
     Note: For stride=1, the number of input channels must equal the number of output channels.
     """
 
-    def __init__(self, channels):
+    def __init__(self, channels, expansion_factor=4):
         super(ShuffleNetBlockV2, self).__init__()
         branch_channels = channels // 2
+        expanded_channels = branch_channels * expansion_factor
+
         self.branch2 = nn.Sequential(
-            nn.Conv2d(branch_channels, branch_channels,
+            # Expansion phase (1x1 conv)
+            nn.Conv2d(branch_channels, expanded_channels,
+                      kernel_size=1, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(expanded_channels),
+            Swish(),
+
+            # Depthwise phase (3x3 depthwise conv with expanded channels)
+            nn.Conv2d(expanded_channels, expanded_channels, kernel_size=3,
+                      stride=1, padding=1, groups=expanded_channels, bias=False),
+            nn.BatchNorm2d(expanded_channels),
+
+            # Projection phase (1x1 conv)
+            nn.Conv2d(expanded_channels, branch_channels,
                       kernel_size=1, stride=1, padding=0, bias=False),
             nn.BatchNorm2d(branch_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(branch_channels, branch_channels, kernel_size=3,
-                      stride=1, padding=1, groups=branch_channels, bias=False),
-            nn.BatchNorm2d(branch_channels),
-            nn.Conv2d(branch_channels, branch_channels,
-                      kernel_size=1, stride=1, padding=0, bias=False),
-            nn.BatchNorm2d(branch_channels),
-            nn.ReLU(inplace=True)
+            Swish()
         )
 
     def forward(self, x):
@@ -621,7 +532,7 @@ def main():
     model = GoNet(
         num_input_planes=go_data_gen.Board.num_feature_planes,
         num_input_features=go_data_gen.Board.num_feature_scalars,
-        channels=320,
+        channels=166,
         num_blocks=16,
         c_head=64
     )
