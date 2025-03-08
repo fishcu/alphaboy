@@ -23,9 +23,191 @@ class Swish(nn.Module):
         return x * torch.sigmoid(self.beta * x)
 
 
+class SEBlock(nn.Module):
+    def __init__(self, channels, reduction=16):
+        super(SEBlock, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc1 = nn.Linear(channels, channels // reduction, bias=False)
+        self.relu = nn.ReLU(inplace=True)
+        self.fc2 = nn.Linear(channels // reduction, channels, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = self.avg_pool(x).view(b, c)
+        y = self.fc1(y)
+        y = self.relu(y)
+        y = self.fc2(y)
+        y = self.sigmoid(y)
+        y = y.view(b, c, 1, 1)
+        return x * y
+
+
+class ShuffleNetBlock(nn.Module):
+    """
+    Implementation of a ShuffleNet block based on the original publication.
+    Features:
+    - Group convolutions for the 1x1 convolutions
+    - Channel shuffle operation
+    - Depthwise separable convolution
+    - Residual connection
+    """
+
+    def __init__(self, squeeze_channels=64, expand_channels=256, groups=4):
+        super(ShuffleNetBlock, self).__init__()
+
+        # Ensure that expand_channels is divisible by groups
+        assert expand_channels % groups == 0, "Expand channels must be divisible by groups"
+
+        # First 1x1 grouped convolution for bottleneck
+        self.conv1 = nn.Conv2d(
+            in_channels=squeeze_channels,
+            out_channels=expand_channels,
+            kernel_size=1,
+            groups=groups,
+            bias=False
+        )
+        self.bn1 = nn.BatchNorm2d(expand_channels)
+        self.swish1 = Swish()
+
+        # Channel shuffle operation
+        self.groups = groups
+
+        # Depthwise 3x3 convolution
+        self.conv2 = nn.Conv2d(
+            in_channels=expand_channels,
+            out_channels=expand_channels,
+            kernel_size=3,
+            padding=1,
+            groups=expand_channels,  # Depthwise convolution
+            bias=False
+        )
+        self.bn2 = nn.BatchNorm2d(expand_channels)
+
+        # Second 1x1 grouped convolution to restore channel dimension
+        self.conv3 = nn.Conv2d(
+            in_channels=expand_channels,
+            out_channels=squeeze_channels,
+            kernel_size=1,
+            groups=groups,
+            bias=False
+        )
+        self.bn3 = nn.BatchNorm2d(squeeze_channels)
+
+        # Final activation
+        self.swish2 = Swish()
+
+    def _channel_shuffle(self, x):
+        batch_size, channels, height, width = x.size()
+        channels_per_group = channels // self.groups
+
+        # Reshape
+        x = x.view(batch_size, self.groups, channels_per_group, height, width)
+
+        # Transpose
+        x = x.transpose(1, 2).contiguous()
+
+        # Flatten
+        x = x.view(batch_size, -1, height, width)
+
+        return x
+
+    def forward(self, x):
+        residual = x
+
+        # Bottleneck
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.swish1(out)
+
+        # Channel shuffle
+        out = self._channel_shuffle(out)
+
+        # Depthwise convolution
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        # Pointwise convolution
+        out = self.conv3(out)
+        out = self.bn3(out)
+
+        # Residual connection
+        out = out + residual
+
+        # Final activation
+        out = self.swish2(out)
+
+        return out
+
+
+def channel_shuffle(x, groups):
+    """
+    Rearranges channels of the input tensor by dividing into groups and then transposing.
+
+    Args:
+        x (Tensor): Input tensor of shape [batch_size, channels, height, width]
+        groups (int): Number of channel groups.
+
+    Returns:
+        Tensor: Channel-shuffled output tensor.
+    """
+    batch_size, num_channels, height, width = x.size()
+    channels_per_group = num_channels // groups
+    # Reshape: [batch_size, groups, channels_per_group, height, width]
+    x = x.view(batch_size, groups, channels_per_group, height, width)
+    # Transpose the group and channel dimensions
+    x = torch.transpose(x, 1, 2).contiguous()
+    # Flatten the tensor back to the original shape
+    x = x.view(batch_size, -1, height, width)
+    return x
+
+
+class ShuffleNetBlockV2(nn.Module):
+    """
+    A simplified ShuffleNetV2 block supporting only the stride=1 variant.
+
+    The input is split equally along the channel dimension into two halves. 
+    The first half is left unchanged, while the second half is processed by:
+      1. A 1×1 convolution followed by BatchNorm and ReLU.
+      2. A depthwise 3×3 convolution with padding=1.
+      3. A second 1×1 convolution followed by BatchNorm and ReLU.
+
+    Finally, the two branches are concatenated and a channel shuffle is applied.
+
+    Note: For stride=1, the number of input channels must equal the number of output channels.
+    """
+
+    def __init__(self, channels):
+        super(ShuffleNetBlockV2, self).__init__()
+        branch_channels = channels // 2
+        self.branch2 = nn.Sequential(
+            nn.Conv2d(branch_channels, branch_channels,
+                      kernel_size=1, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(branch_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(branch_channels, branch_channels, kernel_size=3,
+                      stride=1, padding=1, groups=branch_channels, bias=False),
+            nn.BatchNorm2d(branch_channels),
+            nn.Conv2d(branch_channels, branch_channels,
+                      kernel_size=1, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(branch_channels),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        # Split the input tensor along the channel dimension into two halves.
+        x1, x2 = x.chunk(2, dim=1)
+        # Process the second half and then concatenate with the first half.
+        out = torch.cat((x1, self.branch2(x2)), dim=1)
+        # Apply channel shuffle to mix the features from the two halves.
+        out = channel_shuffle(out, 2)
+        return out
+
+
 class MobileNetBottleneckBlock(nn.Module):
     """
     Implementation of a MobileNet-style bottleneck block with depthwise separable convolutions.
+    Enhanced with Squeeze and Excitation before the addition.
     """
 
     def __init__(self, squeeze_channels=64, expand_channels=256):
@@ -60,6 +242,9 @@ class MobileNetBottleneckBlock(nn.Module):
         )
         self.bn3 = nn.BatchNorm2d(squeeze_channels)
 
+        # Add Squeeze and Excitation block before the addition
+        self.se_block = SEBlock(squeeze_channels)
+
         # Activation function
         self.activation = Swish()
 
@@ -79,6 +264,9 @@ class MobileNetBottleneckBlock(nn.Module):
         # Projection
         out = self.conv2(out)
         out = self.bn3(out)
+
+        # Apply SE block before the addition
+        out = self.se_block(out)
 
         # Skip connection (always used since in_channels == out_channels)
         out = out + identity
@@ -168,14 +356,17 @@ class GoNet(nn.Module):
         self.activation = Swish()
 
         # Trunk
+        # self.blocks = nn.ModuleList([
+        #     MobileNetBottleneckBlock(channels, channels * 4) for _ in range(num_blocks)
+        # ])
         self.blocks = nn.ModuleList([
-            MobileNetBottleneckBlock(channels, channels * 4) for _ in range(num_blocks)
+            ShuffleNetBlockV2(channels) for _ in range(num_blocks)
         ])
-        # self.trunk_final = nn.Sequential(
-        #     nn.BatchNorm2d(channels),
-        #     self.activation
-        # )
-        self.trunk_final = self.activation
+        self.trunk_final = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(channels),
+            Swish()
+        )
 
         # Policy head for board moves
         self.policy_conv = nn.Conv2d(channels, 1, kernel_size=1)
@@ -238,128 +429,14 @@ class GoNet(nn.Module):
 
         return combined_policy, value
 
-    # def save_checkpoint(self, optimizer, scheduler, epoch, loss, save_dir):
-    #     """Save model checkpoint including optimizer and scheduler states."""
-    #     if not os.path.exists(save_dir):
-    #         os.makedirs(save_dir)
-
-    #     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    #     filename = f'model_epoch{epoch}_{timestamp}.pt'
-    #     filepath = os.path.join(save_dir, filename)
-
-    #     # Save model hyperparameters
-    #     model_config = {
-    #         'num_input_planes': self.input_process.spatial_conv.in_channels,
-    #         'num_input_features': self.input_process.scalar_linear.in_features,
-    #         'channels': self.input_process.spatial_conv.out_channels,
-    #         'num_blocks': len(self.blocks),
-    #         'c_head': self.shared_fc.out_features
-    #     }
-
-    #     # Extract optimizer config
-    #     optimizer_config = {
-    #         'type': type(optimizer).__name__,  # Store the actual optimizer type
-    #         'lr': optimizer.param_groups[0]['lr'],
-    #         'weight_decay': optimizer.param_groups[0]['weight_decay']
-    #     }
-
-    #     # Extract scheduler config
-    #     scheduler_config = {}
-    #     if isinstance(scheduler, torch.optim.lr_scheduler.SequentialLR):
-    #         # Handle the warmup + cosine scheduler
-    #         warmup_epochs = getattr(scheduler, 'warmup_epochs', scheduler._milestones[0])
-    #         scheduler_config = {
-    #             'type': 'SequentialLR',
-    #             'warmup_epochs': warmup_epochs,
-    #             'total_epochs': scheduler._schedulers[1].T_max + warmup_epochs,
-    #             'initial_lr': optimizer_config['lr'],
-    #             'final_lr': scheduler._schedulers[1].eta_min
-    #         }
-    #     elif isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR):
-    #         scheduler_config = {
-    #             'type': 'CosineAnnealingLR',
-    #             'T_max': scheduler.T_max,
-    #             'eta_min': scheduler.eta_min
-    #         }
-    #     else:
-    #         scheduler_config = {
-    #             'type': str(type(scheduler).__name__)
-    #         }
-
-    #     torch.save({
-    #         'epoch': epoch,
-    #         'model_config': model_config,
-    #         'optimizer_config': optimizer_config,
-    #         'scheduler_config': scheduler_config,
-    #         'model_state_dict': self.state_dict(),
-    #         'optimizer_state_dict': optimizer.state_dict() if optimizer else None,
-    #         'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
-    #         'loss': loss,
-    #     }, filepath)
-
-    #     return filepath
-
-    # @classmethod
-    # def load_from_checkpoint(cls, checkpoint_path, device="cuda"):
-    #     """Class method to create and load a model from checkpoint."""
-    #     checkpoint = torch.load(checkpoint_path, map_location=device)
-
-    #     # Create model instance from saved config
-    #     model = cls(**checkpoint['model_config']).to(device)
-    #     model.load_state_dict(checkpoint['model_state_dict'])
-
-    #     # Create optimizer based on saved config
-    #     optimizer_config = checkpoint['optimizer_config']
-    #     # Always use AdamW regardless of what was saved in the checkpoint
-    #     optimizer = optim.AdamW(
-    #         model.parameters(),
-    #         lr=optimizer_config['lr'],
-    #         weight_decay=optimizer_config['weight_decay']
-    #     )
-
-    #     # Load optimizer state if available
-    #     if 'optimizer_state_dict' in checkpoint and checkpoint['optimizer_state_dict']:
-    #         try:
-    #             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    #         except Exception as e:
-    #             print(f"Warning: Could not load optimizer state: {e}")
-    #             print("Continuing with freshly initialized optimizer")
-
-    #     # Create scheduler based on saved type
-    #     scheduler_config = checkpoint['scheduler_config']
-    #     if scheduler_config['type'] == 'CosineAnnealingLR':
-    #         scheduler = optim.lr_scheduler.CosineAnnealingLR(
-    #             optimizer,
-    #             T_max=scheduler_config['T_max'],
-    #             eta_min=scheduler_config['eta_min']
-    #         )
-    #     else:
-    #         # For backward compatibility, convert any other scheduler to CosineAnnealingLR
-    #         print(f"Converting {scheduler_config['type']} to CosineAnnealingLR")
-    #         scheduler = optim.lr_scheduler.CosineAnnealingLR(
-    #             optimizer,
-    #             T_max=200,  # Default to 200 epochs
-    #             eta_min=0.00001  # Default final learning rate
-    #         )
-
-    #     # Load scheduler state if available
-    #     if 'scheduler_state_dict' in checkpoint:
-    #         try:
-    #             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-    #         except Exception as e:
-    #             print(f"Warning: Could not load scheduler state: {e}")
-    #             print("Continuing with freshly initialized scheduler")
-
-    #     return model, optimizer, scheduler, checkpoint['epoch'], checkpoint['loss']
-
-    # New implementations for MobileNetBottleneckBlock
+    # New implementations for ShuffleNetBlock
     def save_checkpoint(self, optimizer, scheduler, epoch, loss, save_dir):
         """Save model checkpoint including optimizer and scheduler states."""
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f'mobilenet_model_epoch{epoch}_{timestamp}.pt'
+        filename = f'gonet_model_epoch{epoch}_{timestamp}.pt'
         filepath = os.path.join(save_dir, filename)
 
         # Save model hyperparameters
@@ -396,7 +473,7 @@ class GoNet(nn.Module):
             'loss': loss,
         }, filepath)
 
-        print(f"MobileNet model checkpoint saved to {filepath}")
+        print(f"Model checkpoint saved to {filepath}")
         return filepath
 
     @classmethod
@@ -479,7 +556,7 @@ class GoNet(nn.Module):
 def predict_move(model, board, color, device="cuda", temperature=0.01, allow_pass=True):
     """
     Predict a move for the given board position and color using the model.
-    
+
     Args:
         model: The neural network model to use for prediction
         board: The current board state (go_data_gen.Board)
@@ -487,7 +564,7 @@ def predict_move(model, board, color, device="cuda", temperature=0.01, allow_pas
         device: The device to run inference on ("cuda" or "cpu")
         temperature: Temperature for move sampling (0=deterministic, higher=more random)
         allow_pass: Whether to allow pass moves (set to False for handicap placement)
-    
+
     Returns:
         tuple: (go_data_gen.Move, float) - The predicted move and the value prediction
     """
@@ -502,12 +579,12 @@ def predict_move(model, board, color, device="cuda", temperature=0.01, allow_pas
     # Get model predictions
     with torch.no_grad():
         combined_policy, value = model(spatial_features, scalar_features)
-        
+
         # If pass is not allowed, set the pass logit to a very negative value
         if not allow_pass:
             pass_idx = board.data_size * board.data_size
             combined_policy[0, pass_idx] = float('-inf')
-        
+
         # Apply softmax to get probabilities
         policy_probs = F.softmax(combined_policy, dim=1)[0]
 
@@ -532,7 +609,7 @@ def predict_move(model, board, color, device="cuda", temperature=0.01, allow_pas
         x = mem_x - board.padding
         y = mem_y - board.padding
         move = go_data_gen.Move(color, False, go_data_gen.Vec2(x, y))
-    
+
     # Return both the move and the value
     return move, value[0]
 
@@ -544,9 +621,9 @@ def main():
     model = GoNet(
         num_input_planes=go_data_gen.Board.num_feature_planes,
         num_input_features=go_data_gen.Board.num_feature_scalars,
-        channels=96,
-        num_blocks=12,
-        c_head=32
+        channels=320,
+        num_blocks=16,
+        c_head=64
     )
 
     # Print model summary

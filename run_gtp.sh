@@ -4,6 +4,9 @@
 CONDA_ENV_NAME="base"
 DEFAULT_TEMPERATURE=0.01
 
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
 # Parse command line arguments
 if [ $# -ge 1 ]; then
     CHECKPOINT_PATH="$1"
@@ -17,7 +20,6 @@ if [ $# -ge 2 ]; then
     TEMPERATURE="$2"
 else
     TEMPERATURE="$DEFAULT_TEMPERATURE"
-    echo "No temperature provided, using default: $TEMPERATURE"
 fi
 
 # Source bashrc to make conda available
@@ -48,8 +50,8 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Run the GTP engine
-python gtp.py "$CHECKPOINT_PATH" --temperature "$TEMPERATURE"
+# Run the GTP engine using the script directory to locate gtp.py
+python "$SCRIPT_DIR/gtp.py" "$CHECKPOINT_PATH" --temperature "$TEMPERATURE"
 
 # Deactivate conda environment when done
 conda deactivate

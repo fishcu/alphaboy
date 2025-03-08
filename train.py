@@ -200,6 +200,9 @@ def main():
     random.seed(42)
     torch.manual_seed(42)
 
+    # Enable TensorFloat32 tensor cores for better performance on Ampere+ GPUs
+    torch.set_float32_matmul_precision('high')
+
     # Training parameters
     steps_per_epoch = 1000
     num_epochs = 200
@@ -229,6 +232,18 @@ def main():
         model, optimizer, scheduler, start_epoch, _ = GoNet.load_from_checkpoint(
             args.resume, device)
         print(f'Resuming from epoch {start_epoch}')
+
+        # Compile the model for faster training
+        if hasattr(torch, 'compile'):
+            print("Using torch.compile() to accelerate training")
+            model = torch.compile(
+                model,
+                mode="reduce-overhead",  # More reliable than max-autotune for complex models
+                fullgraph=True,          # Compile the entire model graph
+                dynamic=False,           # Use static shapes for better optimization
+            )
+        else:
+            print("torch.compile() not available in this PyTorch version")
     else:
         print('Starting new training run')
         start_epoch = 0
@@ -236,10 +251,22 @@ def main():
         model = GoNet(
             num_input_planes=go_data_gen.Board.num_feature_planes,
             num_input_features=go_data_gen.Board.num_feature_scalars,
-            channels=96,
-            num_blocks=12,
-            c_head=32
+            channels=320,
+            num_blocks=16,
+            c_head=64
         ).to(device)
+
+        # Compile the model for faster training
+        if hasattr(torch, 'compile'):
+            print("Using torch.compile() to accelerate training")
+            model = torch.compile(
+                model,
+                mode="reduce-overhead",  # More reliable than max-autotune for complex models
+                fullgraph=True,          # Compile the entire model graph
+                dynamic=False,           # Use static shapes for better optimization
+            )
+        else:
+            print("torch.compile() not available in this PyTorch version")
 
         # Initialize optimizer with the initial learning rate
         optimizer = optim.AdamW(
