@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import go_data_gen
 
 from datagen import GoDataGenerator
-from model import GoNet
+from network import GoNet
 
 import random
 
@@ -211,7 +211,7 @@ def main():
     initial_learning_rate = 0.001
     final_learning_rate = 0.00001
     validation_size = 6400
-    weight_decay = 0.0001
+    weight_decay = 0.00004
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     save_dir = './checkpoints'
@@ -251,7 +251,7 @@ def main():
         model = GoNet(
             num_input_planes=go_data_gen.Board.num_feature_planes,
             num_input_features=go_data_gen.Board.num_feature_scalars,
-            channels=166,
+            channels=84,
             num_blocks=16,
             c_head=64
         ).to(device)
