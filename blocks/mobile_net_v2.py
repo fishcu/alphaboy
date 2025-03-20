@@ -34,6 +34,9 @@ class MobileNetV2Block(nn.Module):
         )
         self.bn2 = nn.BatchNorm2d(expand_channels)
         self.act2 = Swish()
+
+        self.se_block = SEBlock(expand_channels, reduction=16)
+
         # Projection phase (1x1 conv)
         self.conv2 = nn.Conv2d(
             in_channels=expand_channels,
@@ -43,10 +46,7 @@ class MobileNetV2Block(nn.Module):
         )
         self.bn3 = nn.BatchNorm2d(in_channels)
 
-        # Add Squeeze and Excitation block before the addition
-        self.se_block = SEBlock(in_channels)
-
-    def forward(self, x):
+    def forward(self, x, on_board_mask, num_intersections):
         identity = x
 
         # Expansion
@@ -56,15 +56,16 @@ class MobileNetV2Block(nn.Module):
 
         # Depthwise
         out = self.depthwise(out)
+        out = out * on_board_mask.unsqueeze(1)  # Mask off-board locations
         out = self.bn2(out)
         out = self.act2(out)
+
+        # Squeeze and Excitation
+        out = self.se_block(out, num_intersections)
 
         # Projection
         out = self.conv2(out)
         out = self.bn3(out)
-
-        # Apply SE block before the addition
-        out = self.se_block(out)
 
         # Skip connection (always used since in_channels == out_channels)
         out = out + identity

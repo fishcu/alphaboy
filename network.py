@@ -18,6 +18,7 @@ from blocks.pooling import GlobalAvgPool2d
 from blocks.activation import Swish
 from blocks.mobile_net_v2 import MobileNetV2Block
 from blocks.shuffle_net_v2 import ShuffleNetV2Block
+from blocks.ghost_net import GhostBottleneckBlock
 
 
 class GoNet(nn.Module):
@@ -49,7 +50,7 @@ class GoNet(nn.Module):
 
         # Trunk
         self.blocks = nn.ModuleList([
-            ShuffleNetV2Block(channels) for _ in range(num_blocks)
+            MobileNetV2Block(channels, channels * 6) for _ in range(num_blocks)
         ])
 
         # Policy head for board moves
@@ -76,7 +77,10 @@ class GoNet(nn.Module):
         # Use self.legal_move_plane_index instead of go_data_gen.Board.legal_move_plane_index
         legal_moves_mask = spatial_input[..., self.legal_move_plane_index]
         # [N, H, W]
-        # on_board_mask = spatial_input[..., self.on_board_plane_index]
+        on_board_mask = spatial_input[..., self.on_board_plane_index]
+
+        # Get number of intersections on the board
+        num_intersections = on_board_mask.sum(dim=(1, 2))
 
         # Process spatial features
         # Convert from NHWC to NCHW format
@@ -96,8 +100,7 @@ class GoNet(nn.Module):
 
         # Process through trunk
         for block in self.blocks:
-            x = block(x)
-            # TODO: apply on-board mask here
+            x = block(x, on_board_mask, num_intersections)
 
         # Policy head for board moves
         policy = self.policy_head(x)
@@ -303,7 +306,7 @@ def main():
     model = GoNet(
         num_input_planes=go_data_gen.Board.num_feature_planes,
         num_input_features=go_data_gen.Board.num_feature_scalars,
-        channels=278,
+        channels=59,
         num_blocks=16,
         c_head=64
     )
