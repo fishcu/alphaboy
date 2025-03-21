@@ -61,9 +61,11 @@ class GoNet(nn.Module):
             Swish(),
         )
 
-        # Shared processing for pass and value
-        self.pass_and_value_head = nn.Sequential(
-            GlobalAvgPool2d(),
+        # Separate the GlobalAvgPool2d for cleaner forward pass
+        self.global_pool = GlobalAvgPool2d()
+
+        # Rest of pass and value head processing
+        self.pass_and_value_processing = nn.Sequential(
             nn.Linear(in_features=channels, out_features=c_head),
             nn.BatchNorm1d(c_head),
             Swish(),
@@ -73,14 +75,11 @@ class GoNet(nn.Module):
         # Convert model to channels_last format
         self = self.to(memory_format=torch.channels_last)
 
-    def forward(self, spatial_input, scalar_input):
+    def forward(self, spatial_input, scalar_input, board_width, board_height, num_intersections):
         # Use self.legal_move_plane_index instead of go_data_gen.Board.legal_move_plane_index
         legal_moves_mask = spatial_input[..., self.legal_move_plane_index]
         # [N, H, W]
         on_board_mask = spatial_input[..., self.on_board_plane_index]
-
-        # Get number of intersections on the board
-        num_intersections = on_board_mask.sum(dim=(1, 2))
 
         # Process spatial features
         # Convert from NHWC to NCHW format
@@ -100,13 +99,18 @@ class GoNet(nn.Module):
 
         # Process through trunk
         for block in self.blocks:
-            x = block(x, on_board_mask, num_intersections)
+            x = block(x, on_board_mask, board_width,
+                      board_height, num_intersections)
 
         # Policy head for board moves
         policy = self.policy_head(x)
 
         # Process through pass and value head and extract pass logit and value
-        pass_logit, value = self.pass_and_value_head(x).split(1, dim=-1)
+        # Use the separated GlobalAvgPool2d with num_intersections
+        pooled_x = self.global_pool(x, num_intersections)
+        # Process through the remaining layers
+        final_output = self.pass_and_value_processing(pooled_x)
+        pass_logit, value = final_output.split(1, dim=-1)
         pass_logit, value = pass_logit.squeeze(-1), value.squeeze(-1)
 
         # Process policy output with legal moves mask
@@ -152,7 +156,7 @@ class GoNet(nn.Module):
             'num_input_features': self.input_process.scalar_linear.in_features,
             'channels': self.input_process.spatial_conv.out_channels,
             'num_blocks': len(self.blocks),
-            'c_head': self.pass_and_value_head[1].out_features
+            'c_head': self.pass_and_value_processing[0].out_features
         }
 
         # Extract optimizer config
@@ -261,9 +265,21 @@ def predict_move(model, board, color, device="cuda", temperature=0.01, allow_pas
     spatial_features = spatial_features.unsqueeze(0).to(device)
     scalar_features = scalar_features.unsqueeze(0).to(device)
 
+    # Extract board dimensions
+    board_size = board.get_board_size()
+    board_width = board_size.x
+    board_height = board_size.y
+    num_intersections = board_width * board_height
+
     # Get model predictions
     with torch.no_grad():
-        combined_policy, value = model(spatial_features, scalar_features)
+        combined_policy, value = model(
+            spatial_features,
+            scalar_features,
+            board_width,
+            board_height,
+            num_intersections
+        )
 
         # If pass is not allowed, set the pass logit to a very negative value
         if not allow_pass:
@@ -306,7 +322,7 @@ def main():
     model = GoNet(
         num_input_planes=go_data_gen.Board.num_feature_planes,
         num_input_features=go_data_gen.Board.num_feature_scalars,
-        channels=59,
+        channels=64,
         num_blocks=16,
         c_head=64
     )
@@ -316,7 +332,8 @@ def main():
             input_size=[(1, go_data_gen.Board.data_size,
                         go_data_gen.Board.data_size,
                         go_data_gen.Board.num_feature_planes),
-                        (1, go_data_gen.Board.num_feature_scalars)],
+                        (1, go_data_gen.Board.num_feature_scalars),
+                        (1,), (1,), (1,)],
             col_names=["input_size", "output_size", "num_params", "kernel_size",
                        "mult_adds"],
             col_width=20,
@@ -325,19 +342,31 @@ def main():
     # Get data and move to GPU
     data_dir = "./data/val"
     generator = GoDataGenerator(data_dir, debug=False)
-    spatial_batch, scalar_batch, policy_batch, value_batch = generator.generate_batch(
+    spatial_batch, scalar_batch, policy_batch, value_batch, board_width_batch, board_height_batch, num_intersections_batch = generator.generate_batch(
         batch_size=2)
 
     spatial_batch = spatial_batch.cuda()
     scalar_batch = scalar_batch.cuda()
+    board_width_batch = board_width_batch.cuda()
+    board_height_batch = board_height_batch.cuda()
+    num_intersections_batch = num_intersections_batch.cuda()
 
     # Forward pass
-    policy_out, value_out = model(spatial_batch, scalar_batch)
+    policy_out, value_out = model(
+        spatial_batch,
+        scalar_batch,
+        board_width_batch,
+        board_height_batch,
+        num_intersections_batch
+    )
 
     # Print shapes to verify matching interfaces
     print("\nInput shapes:")
     print("Spatial input:", spatial_batch.shape)
     print("Scalar input:", scalar_batch.shape)
+    print("Board width:", board_width_batch.shape)
+    print("Board height:", board_height_batch.shape)
+    print("Num intersections:", num_intersections_batch.shape)
 
     print("\nTarget shapes:")
     print("Policy target:", policy_batch.shape)

@@ -29,6 +29,9 @@ class GoDataGenerator:
         scalar_data = []
         policy_data = []
         value_data = []
+        board_width_data = []
+        board_height_data = []
+        num_intersections_data = []
 
         while len(spatial_data) < batch_size:
             sgf_file = self.sgf_files[random.randint(
@@ -83,10 +86,22 @@ class GoDataGenerator:
                     value = torch.tensor(
                         1.0 if to_play == go_data_gen.Color.White else 0.0, dtype=torch.float32)
 
+                # Get board dimensions and number of intersections
+                board_size = board.get_board_size()
+                board_width = board_size.x
+                board_height = board_size.y
+                num_intersections = board_width * board_height
+
                 spatial_data.append(spatial_features)
                 scalar_data.append(scalar_features)
                 policy_data.append(policy)
                 value_data.append(value)
+                board_width_data.append(torch.tensor(
+                    board_width, dtype=torch.int32))
+                board_height_data.append(torch.tensor(
+                    board_height, dtype=torch.int32))
+                num_intersections_data.append(torch.tensor(
+                    num_intersections, dtype=torch.int32))
 
             except Exception as e:
                 print(f"Error loading SGF file: {os.path.abspath(sgf_file)}")
@@ -99,12 +114,15 @@ class GoDataGenerator:
         spatial_batch = torch.stack(spatial_data)  # [N, H, W, C]
         scalar_batch = torch.stack(scalar_data)    # [N, F]
         policy_batch = torch.stack(policy_data)    # [N]
-        value_batch = torch.stack(value_data)    # [N]
+        value_batch = torch.stack(value_data)      # [N]
+        board_width_batch = torch.stack(board_width_data)  # [N]
+        board_height_batch = torch.stack(board_height_data)  # [N]
+        num_intersections_batch = torch.stack(num_intersections_data)  # [N]
 
         self.current_board = board
         self.current_move = moves[next_play_idx]
 
-        return spatial_batch, scalar_batch, policy_batch, value_batch
+        return spatial_batch, scalar_batch, policy_batch, value_batch, board_width_batch, board_height_batch, num_intersections_batch
 
 
 def main():
@@ -114,7 +132,7 @@ def main():
     generator = GoDataGenerator(data_dir, debug=True)
 
     batch_size = 2**3
-    spatial_batch, scalar_batch, policy_batch, value_batch = generator.generate_batch(
+    spatial_batch, scalar_batch, policy_batch, value_batch, board_width_batch, board_height_batch, num_intersections_batch = generator.generate_batch(
         batch_size)
 
     # Debug policy encoding for last example in batch (matches current_move)
@@ -147,6 +165,13 @@ def main():
     print("Scalar input batch shape:", scalar_batch.shape)
     print("Policy batch shape:", policy_batch.shape)
     print("Value batch shape:", value_batch.shape)
+    print("Board width batch shape:", board_width_batch.shape)
+    print("Board height batch shape:", board_height_batch.shape)
+    print("Number of intersections batch shape:", num_intersections_batch.shape)
+    print("\nBoard dimensions for second example:")
+    print(f"Width: {board_width_batch[1].item()}")
+    print(f"Height: {board_height_batch[1].item()}")
+    print(f"Intersections: {num_intersections_batch[1].item()}")
 
 
 if __name__ == "__main__":

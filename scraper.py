@@ -8,8 +8,8 @@ from datetime import date, timedelta
 # Set the base URLs and date range
 games_base_url = "https://katagoarchive.org/kata1/traininggames/"
 data_base_url = "https://katagoarchive.org/kata1/trainingdata/"
-start_date = date(2025, 1, 4)
-end_date = date(2025, 3, 17)
+start_date = date(2024, 1, 1)
+end_date = date(2024, 6, 30)
 
 # Configuration
 cooldown_time = 1  # seconds between requests

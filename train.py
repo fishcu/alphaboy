@@ -27,17 +27,26 @@ def train_epoch(data_generator, model, batch_size, steps_per_epoch, optimizer, s
 
     pbar = tqdm(range(steps_per_epoch), desc="Training", unit="batch")
     for _ in pbar:
-        spatial_batch, scalar_batch, policy_batch, value_batch = data_generator.generate_batch(
+        spatial_batch, scalar_batch, policy_batch, value_batch, board_width_batch, board_height_batch, num_intersections_batch = data_generator.generate_batch(
             batch_size)
 
         spatial_batch = spatial_batch.to(device)
         scalar_batch = scalar_batch.to(device)
         policy_batch = policy_batch.to(device)
         value_batch = value_batch.to(device)
+        board_width_batch = board_width_batch.to(device)
+        board_height_batch = board_height_batch.to(device)
+        num_intersections_batch = num_intersections_batch.to(device)
 
         optimizer.zero_grad()
 
-        combined_policy, value_out = model(spatial_batch, scalar_batch)
+        combined_policy, value_out = model(
+            spatial_batch,
+            scalar_batch,
+            board_width_batch,
+            board_height_batch,
+            num_intersections_batch
+        )
 
         policy_loss = policy_criterion(combined_policy, policy_batch)
         value_loss = value_criterion(value_out, value_batch)
@@ -77,15 +86,24 @@ def validate(data_generator, model, validation_samples, batch_size, device):
             current_batch_size = min(
                 batch_size, validation_samples - batch_idx * batch_size)
 
-            spatial_batch, scalar_batch, policy_batch, value_batch = data_generator.generate_batch(
+            spatial_batch, scalar_batch, policy_batch, value_batch, board_width_batch, board_height_batch, num_intersections_batch = data_generator.generate_batch(
                 current_batch_size)
 
             spatial_batch = spatial_batch.to(device)
             scalar_batch = scalar_batch.to(device)
             policy_batch = policy_batch.to(device)
             value_batch = value_batch.to(device)
+            board_width_batch = board_width_batch.to(device)
+            board_height_batch = board_height_batch.to(device)
+            num_intersections_batch = num_intersections_batch.to(device)
 
-            combined_policy, value_out = model(spatial_batch, scalar_batch)
+            combined_policy, value_out = model(
+                spatial_batch,
+                scalar_batch,
+                board_width_batch,
+                board_height_batch,
+                num_intersections_batch
+            )
 
             # Apply sigmoid to value_out before computing loss
             value_out = torch.sigmoid(value_out)
@@ -136,8 +154,25 @@ def validate_single_move(model, spatial_batch, scalar_batch, value_batch, data_g
         print("\nCurrent board state before move:")
         board.print()
 
+        # Extract board dimensions
+        board_size = board.get_board_size()
+        board_width = board_size.x
+        board_height = board_size.y
+        num_intersections = board_width * board_height
+
+        # Convert dimensions to tensors on the same device as model inputs
+        board_width = torch.tensor([board_width], device=spatial_batch.device)
+        board_height = torch.tensor([board_height], device=spatial_batch.device)
+        num_intersections = torch.tensor([num_intersections], device=spatial_batch.device)
+
         # Get model predictions
-        combined_policy, value_out = model(spatial_batch, scalar_batch)
+        combined_policy, value_out = model(
+            spatial_batch,
+            scalar_batch,
+            board_width,
+            board_height,
+            num_intersections
+        )
         policy_probs = F.softmax(combined_policy, dim=1)[0]
 
         # Print policy distribution
@@ -251,7 +286,7 @@ def main():
         model = GoNet(
             num_input_planes=go_data_gen.Board.num_feature_planes,
             num_input_features=go_data_gen.Board.num_feature_scalars,
-            channels=59,
+            channels=64,
             num_blocks=16,
             c_head=64
         ).to(device)

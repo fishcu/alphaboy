@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from blocks.activation import Swish
-from blocks.se import SEBlock
+from blocks.attention import SEBlock
 
 
 def channel_shuffle(x, groups):
