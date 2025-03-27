@@ -1,7 +1,18 @@
 import torch
 import torch.nn as nn
 from blocks.activation import Swish
-from blocks.attention import SEBlock, ECABlock, ELABlock
+from blocks.attention import (
+    SEBlock,
+    CBAMBlock,
+    ECABlock,
+    CABlock,
+    SimAMBlock,
+    EMABlock,
+    ELABlock,
+    EANBlock,
+    MECABlock,
+    MVECABlock
+)
 
 
 class MobileNetV2Block(nn.Module):
@@ -35,7 +46,7 @@ class MobileNetV2Block(nn.Module):
         self.bn2 = nn.BatchNorm2d(expand_channels)
         self.act2 = Swish()
 
-        self.attention = ELABlock(expand_channels)
+        self.attention = EANBlock(expand_channels)
 
         # Projection phase (1x1 conv)
         self.conv2 = nn.Conv2d(
@@ -60,8 +71,8 @@ class MobileNetV2Block(nn.Module):
         out = self.bn2(out)
         out = self.act2(out)
 
-        # Squeeze and Excitation
-        out = self.attention(out, board_width, board_height)
+        # Attention
+        out = self.attention(out)
 
         # Projection
         out = self.conv2(out)
