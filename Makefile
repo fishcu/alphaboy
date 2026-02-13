@@ -36,7 +36,8 @@ OBJS += $(RESSOURCES:%.c=$(OBJDIR)/%.o)
 OBJS += $(ASMSOURCES:%.s=$(OBJDIR)/%.o)
 
 # ---- Flags ----
-LCCFLAGS =
+# MBC5 + RAM + Battery (cart type 0x1B), 1 RAM bank (8 KB)
+LCCFLAGS = -Wm-yt0x1B -Wm-ya1
 
 ifdef GBDK_DEBUG
 	LCCFLAGS += -debug -v

@@ -1,18 +1,25 @@
 #include <gb/gb.h>
+#include <gb/hardware.h>
 #include <stdint.h>
 #include <string.h>
 
 #include "../res/tiles.h"
 
 /*
- * VRAM tile layout:
+ * VRAM layout (LCDC bit 4 = 1, unsigned addressing):
+ *
+ *   0x8000-0x8FFF  Shared BG + Sprite tiles  (4 KB, 256 tiles)
+ *   0x9000-0x97FF  Free                      (2 KB)
+ *   0x9800-0x9BFF  BG Map                    (1 KB, hardware-fixed)
+ *   0x9C00-0x9FFF  Window Map                (1 KB, hardware-fixed)
+ *
+ * Tile allocation at 0x8000:
  *   0        = blank (solid color-index-0, i.e. black)
  *   1 .. 12  = sprite sheet tiles (loaded from png2asset data)
- *
- * We load the sprite sheet at offset 1 so tile 0 stays blank.
- * The background tilemap defaults to 0 after we fill it, giving
- * a clean black surround.
+ *   13..255  = free
  */
+
+#define TILE_DATA_BASE  0x80
 
 #define TILE_OFFSET  1
 
@@ -67,6 +74,15 @@ static void fill_bkg(uint8_t tile) {
 }
 
 void main(void) {
+    DISPLAY_OFF;
+
+    /*
+     * Set LCDC bit 4: BG + Window read tile data from 0x8000 (unsigned),
+     * sharing the same region as sprites.  All other LCDC bits start clear
+     * (display off, layers off) — we turn them on at the end.
+     */
+    LCDC_REG = LCDCF_BG8000;
+
     /*
      * DMG palette: map color indices to hardware shades.
      *   Index 0 -> black  (shade 3)
@@ -76,11 +92,9 @@ void main(void) {
      */
     BGP_REG = 0x1Bu;
 
-    /* Load blank tile at VRAM position 0. */
-    set_bkg_data(0, 1, blank_tile);
-
-    /* Load sprite sheet tiles at VRAM positions 1..12. */
-    set_bkg_data(TILE_OFFSET, tiles_TILE_COUNT, tiles_tiles);
+    /* Load tiles to 0x8000 (shared BG + Sprite region). */
+    set_tile_data(0, 1, blank_tile, TILE_DATA_BASE);
+    set_tile_data(TILE_OFFSET, tiles_TILE_COUNT, tiles_tiles, TILE_DATA_BASE);
 
     /* Fill entire visible background with the blank tile. */
     fill_bkg(TILE_BLANK);
@@ -89,6 +103,7 @@ void main(void) {
     set_bkg_tiles(BOARD_X, BOARD_Y, BOARD_SIZE, BOARD_SIZE, board_map);
 
     SHOW_BKG;
+    DISPLAY_ON;
 
     while (1) {
         vsync();

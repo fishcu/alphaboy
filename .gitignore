@@ -1,6 +1,7 @@
 gbdk_source_and_docs/
 gbdk_release/
 bgbw64/
+pandocs/
 obj/
 build/
 *.gb
