@@ -5,11 +5,9 @@
 ifeq ($(OS),Windows_NT)
     MKDIR  = cmd /c mkdir
     RMDIR  = cmd /c rmdir /S /Q
-    LAUNCH = cmd /c
 else
     MKDIR  = mkdir -p
     RMDIR  = rm -rf
-    LAUNCH =
 endif
 
 # ---- Paths ----
@@ -41,13 +39,8 @@ LCCFLAGS = -Wm-yt0x1B -Wm-ya1
 
 ifdef GBDK_DEBUG
 	LCCFLAGS += -debug -v
-endif
-
-# ---- Emulator ----
-ifeq ($(OS),Windows_NT)
-    BGB = bgbw64\bgb64.exe
 else
-    BGB = bgbw64/bgb64.exe
+	LCCFLAGS += -DNDEBUG
 endif
 
 # ---- Targets ----
@@ -83,10 +76,23 @@ dirs:
 	-$(MKDIR) $(OBJDIR)
 	-$(MKDIR) $(BUILDDIR)
 
+# ---- Emulator ----
+# BGB writes debug messages to DEBUGMSG (DebugMsgFile=1 in bgb.ini).
+# We overwrite the file with a timestamp before each run.
+ifeq ($(OS),Windows_NT)
+    BGB      = bgbw64\bgb64.exe
+    DEBUGMSG = bgbw64\debugmsg.txt
+else
+    BGB      = bgbw64/bgb64.exe
+    DEBUGMSG = bgbw64/debugmsg.txt
+endif
+
 run: all
 ifeq ($(OS),Windows_NT)
-	$(LAUNCH) $(BGB) $(subst /,\,$(BINS))
+	echo --- Run: %DATE% %TIME% --- > $(DEBUGMSG)
+	$(BGB) $(subst /,\,$(BINS))
 else
+	date "+--- Run: %Y-%m-%d %H:%M:%S ---" > $(DEBUGMSG)
 	$(BGB) $(BINS)
 endif
 

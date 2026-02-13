@@ -58,4 +58,11 @@ typedef struct board {
  * Asserts that width and height are in [1, BOARD_MAX_SIZE]. */
 void board_reset(board_t *b, uint8_t width, uint8_t height);
 
+#ifndef NDEBUG
+/* Print the board state to the emulator debug message window.
+ * Output resembles GnuGo's ASCII board: X=black, O=white, .=empty.
+ * Compiles away in release builds (NDEBUG defined). */
+void board_debug_print(const board_t *b);
+#endif
+
 #endif /* BOARD_H */

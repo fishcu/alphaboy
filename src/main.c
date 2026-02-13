@@ -154,6 +154,9 @@ void main(void) {
     BF_SET(b->white_stones, BOARD_COORD(3, 4));
     BF_SET(b->white_stones, BOARD_COORD(10, 4));
 
+#ifndef NDEBUG
+    board_debug_print(b);
+#endif
     board_draw(b, BOARD_BKG_X, BOARD_BKG_Y);
 
     SHOW_BKG;
