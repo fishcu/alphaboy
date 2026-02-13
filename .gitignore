@@ -1,0 +1,6 @@
+gbdk_source_and_docs/
+gbdk_release/
+bgbw64/
+obj/
+build/
+*.gb
