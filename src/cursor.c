@@ -22,15 +22,15 @@ void cursor_init(cursor_t *c, uint8_t col, uint8_t row) {
 }
 
 void cursor_update(cursor_t *c, const input_t *inp, const board_t *b) {
-    uint8_t pressed = inp->pressed;
+    uint8_t trigger = inp->pressed | inp->repeated;
 
-    if ((pressed & J_LEFT) && c->col > 0)
+    if ((trigger & J_LEFT) && c->col > 0)
         c->col--;
-    if ((pressed & J_RIGHT) && c->col < b->width - 1)
+    if ((trigger & J_RIGHT) && c->col < b->width - 1)
         c->col++;
-    if ((pressed & J_UP) && c->row > 0)
+    if ((trigger & J_UP) && c->row > 0)
         c->row--;
-    if ((pressed & J_DOWN) && c->row < b->height - 1)
+    if ((trigger & J_DOWN) && c->row < b->height - 1)
         c->row++;
 }
 

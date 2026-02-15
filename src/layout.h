@@ -7,7 +7,6 @@
 #include "cursor.h"
 #include "input.h"
 
-
 /*
  * Memory Layout
  * =============
@@ -53,7 +52,8 @@
 /* Pack four 2-bit shade values into a DMG palette register byte.
  * Each argument is the shade (0=white, 1=light, 2=dark, 3=black)
  * for the corresponding color index. */
-#define DMG_PAL(s0, s1, s2, s3) ((s0) | ((s1) << 2) | ((s2) << 4) | ((s3) << 6))
+#define DMG_PAL(s0, s1, s2, s3)                                                \
+    ((uint8_t)((s0) | ((s1) << 2) | ((s2) << 4) | ((s3) << 6)))
 
 /* ------------------------------------------------------------------ */
 /*  Tile data                                                         */
