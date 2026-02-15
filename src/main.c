@@ -4,54 +4,10 @@
 #include <string.h>
 
 #include "../res/tiles.h"
-#include "board.h"
-
-/*
- * VRAM layout (LCDC bit 4 = 1, unsigned addressing):
- *
- *   0x8000-0x8FFF  Shared BG + Sprite tiles  (4 KB, 256 tiles)
- *   0x9000-0x97FF  Free                      (2 KB)
- *   0x9800-0x9BFF  BG Map                    (1 KB, hardware-fixed)
- *   0x9C00-0x9FFF  Window Map                (1 KB, hardware-fixed)
- *
- * Tile allocation at 0x8000:
- *   0        = blank (solid color-index-0, i.e. black)
- *   1 .. 12  = sprite sheet tiles (loaded from png2asset data)
- *   13..255  = free
- */
-
-#define TILE_DATA_BASE  0x80
-
-#define TILE_OFFSET  1
-
-/* Tile indices (sprite-sheet position + offset). */
-#define TILE_BLANK      0
-#define TILE_CURSOR     (0  + TILE_OFFSET)
-#define TILE_STONE_W    (1  + TILE_OFFSET)
-#define TILE_STONE_B    (2  + TILE_OFFSET)
-#define TILE_CORNER_TL  (3  + TILE_OFFSET)
-#define TILE_EDGE_T     (4  + TILE_OFFSET)
-#define TILE_CORNER_TR  (5  + TILE_OFFSET)
-#define TILE_EDGE_L     (6  + TILE_OFFSET)
-#define TILE_CENTER     (7  + TILE_OFFSET)
-#define TILE_EDGE_R     (8  + TILE_OFFSET)
-#define TILE_CORNER_BL  (9  + TILE_OFFSET)
-#define TILE_EDGE_B     (10 + TILE_OFFSET)
-#define TILE_CORNER_BR  (11 + TILE_OFFSET)
-
-/* Board instance in SRAM (0xA000). */
-#define game_board ((board_t *)0xA000)
-
-/* Board draw position on the BG tilemap (in tiles). */
-#define BOARD_BKG_X  1
-#define BOARD_BKG_Y  1
-
-/* Visible screen size in tiles. */
-#define SCREEN_W  20
-#define SCREEN_H  18
+#include "layout.h"
 
 /* Blank tile: 16 zero bytes = all pixels at color index 0 (black). */
-static const uint8_t blank_tile[16] = {0};
+static const uint8_t blank_tile[16] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 /* Return the board-surface tile for an empty intersection. */
 static uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
@@ -120,14 +76,11 @@ void main(void) {
      */
     LCDC_REG = LCDCF_BG8000;
 
-    /*
-     * DMG palette: map color indices to hardware shades.
-     *   Index 0 -> black  (shade 3)
-     *   Index 1 -> dark   (shade 2)
-     *   Index 2 -> light  (shade 1)
-     *   Index 3 -> white  (shade 0)
-     */
-    BGP_REG = 0x1Bu;
+    /* DMG palettes: DMG_PAL(idx0, idx1, idx2, idx3)
+     * Shades: 0=white, 1=light, 2=dark, 3=black.
+     * Sprite index 0 is always transparent regardless of OBP value. */
+    BGP_REG  = DMG_PAL(0, 1, 2, 3);
+    OBP0_REG = DMG_PAL(0, 0, 3, 2);
 
     /* Load tiles to 0x8000 (shared BG + Sprite region). */
     set_tile_data(0, 1, blank_tile, TILE_DATA_BASE);
@@ -136,8 +89,11 @@ void main(void) {
     /* Fill entire visible background with the blank tile. */
     fill_bkg(TILE_BLANK);
 
-    /* Initialize and draw the board from SRAM. */
+    /* Enable SRAM and zero-init input state. */
     ENABLE_RAM;
+    memset(game_input, 0, sizeof(input_t));
+
+    /* Initialize and draw the board. */
     board_t *b = game_board;
     board_reset(b, 13, 9);
 
@@ -159,10 +115,18 @@ void main(void) {
 #endif
     board_draw(b, BOARD_BKG_X, BOARD_BKG_Y);
 
+    /* Initialize the cursor at the center of the board. */
+    cursor_init(game_cursor, b->width / 2, b->height / 2);
+    cursor_draw(game_cursor, BOARD_BKG_X, BOARD_BKG_Y);
+
     SHOW_BKG;
+    SHOW_SPRITES;
     DISPLAY_ON;
 
     while (1) {
         vsync();
+        input_poll(game_input);
+        cursor_update(game_cursor, game_input, b);
+        cursor_draw(game_cursor, BOARD_BKG_X, BOARD_BKG_Y);
     }
 }
