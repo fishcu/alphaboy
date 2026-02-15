@@ -5,8 +5,8 @@
 
 /* Typematic repeat: initial delay before auto-repeat starts,
  * then repeat fires every REPEAT_RATE frames. (in frames, ~60 fps) */
-#define INPUT_REPEAT_DELAY  20
-#define INPUT_REPEAT_RATE    6
+#define INPUT_REPEAT_DELAY 20
+#define INPUT_REPEAT_RATE 6
 
 typedef struct input {
     uint8_t current;      /* buttons held this frame              */

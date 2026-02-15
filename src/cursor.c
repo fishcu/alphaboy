@@ -6,17 +6,18 @@
 
 /* Compute target OAM X as fixed-point 8.8.
  * Board is drawn at BG tile (0,0) and centered via scroll registers.
- * OAM X = screen_offset + col*8 + 8 (OAM hardware offset). */
+ * OAM X = screen_offset + col*CELL_W + 8 (OAM hardware offset). */
 static uint16_t target_x(uint8_t col, uint8_t board_w) {
-    uint8_t offset = (SCREEN_W - board_w) * 4;
-    return (uint16_t)(offset + col * 8 + 8) << 8;
+    uint8_t offset = (SCREEN_W * 8 - board_w * CELL_W) / 2;
+    return (uint16_t)(offset + col * CELL_W + 8) << 8;
 }
 
 /* Compute target OAM Y as fixed-point 8.8.
- * OAM Y = screen_offset + row*8 + 16 (OAM hardware offset). */
+ * Vertical compression: each cell is CELL_H pixels on screen.
+ * OAM Y = screen_offset + row*CELL_H + 16 (OAM hardware offset). */
 static uint16_t target_y(uint8_t row, uint8_t board_h) {
-    uint8_t offset = (SCREEN_H - board_h) * 4;
-    return (uint16_t)(offset + row * 8 + 16) << 8;
+    uint8_t offset = (SCREEN_H * 8 - board_h * CELL_H) / 2;
+    return (uint16_t)(offset + row * CELL_H + 15) << 8;
 }
 
 /* Move `cur` toward `tgt` with exponential tracking.

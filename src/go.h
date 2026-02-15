@@ -33,12 +33,12 @@
  * Two bytes per move; used for the move history. */
 typedef uint16_t move_t;
 
-#define MOVE_COLOR_BIT  15
+#define MOVE_COLOR_BIT 15
 #define MOVE_COORD_MASK 0x7FFFu
 
-#define MOVE_MAKE(coord, color) \
+#define MOVE_MAKE(coord, color)                                                \
     ((move_t)((coord) | ((move_t)(color) << MOVE_COLOR_BIT)))
-#define MOVE_COORD(m) ((m) & MOVE_COORD_MASK)
+#define MOVE_COORD(m) ((m)&MOVE_COORD_MASK)
 #define MOVE_COLOR(m) ((m) >> MOVE_COLOR_BIT)
 
 /* Maximum number of moves stored in history. */
@@ -77,12 +77,12 @@ typedef uint8_t bitfield_t[BOARD_FIELD_BYTES];
 typedef struct game {
     uint8_t width;
     uint8_t height;
-    int8_t komi2;            /* 2 * komi (bonus for white at game end) */
-    uint16_t ko;             /* active ko position, COORD_PASS if none */
-    uint16_t move_count;     /* number of moves played so far          */
-    bitfield_t on_board;     /* 1 = coordinate lies inside the board   */
-    bitfield_t black_stones; /* 1 = black stone present                */
-    bitfield_t white_stones; /* 1 = white stone present                */
+    int8_t komi2;                /* 2 * komi (bonus for white at game end) */
+    uint16_t ko;                 /* active ko position, COORD_PASS if none */
+    uint16_t move_count;         /* number of moves played so far          */
+    bitfield_t on_board;         /* 1 = coordinate lies inside the board   */
+    bitfield_t black_stones;     /* 1 = black stone present                */
+    bitfield_t white_stones;     /* 1 = white stone present                */
     move_t history[HISTORY_MAX]; /* packed move log for undo/replay    */
 } game_t;
 

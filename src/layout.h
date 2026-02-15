@@ -3,9 +3,10 @@
 
 #include <stdint.h>
 
-#include "go.h"
 #include "cursor.h"
+#include "go.h"
 #include "input.h"
+
 
 /*
  * Memory Layout
@@ -42,8 +43,7 @@
 
 #define game_input ((input_t *)(SRAM_BASE + sizeof(game_t)))
 
-#define game_cursor                                                            \
-    ((cursor_t *)(SRAM_BASE + sizeof(game_t) + sizeof(input_t)))
+#define game_cursor ((cursor_t *)(SRAM_BASE + sizeof(game_t) + sizeof(input_t)))
 
 /* ------------------------------------------------------------------ */
 /*  Palette helper                                                    */
@@ -86,6 +86,12 @@
 
 #define SCREEN_W 20 /* screen width in tiles  (160 px) */
 #define SCREEN_H 18 /* screen height in tiles (144 px) */
+
+/* Cell dimensions as displayed on screen.
+ * Vertical HBlank compression skips the top pixel row of each tile,
+ * giving 7 visible rows per cell.  Horizontal is uncompressed. */
+#define CELL_W 8
+#define CELL_H 7
 
 /* ------------------------------------------------------------------ */
 /*  OAM sprite allocation                                             */

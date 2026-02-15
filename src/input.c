@@ -10,7 +10,7 @@ void input_poll(input_t *inp) {
     inp->pressed = inp->current & ~prev;
     inp->repeated = 0;
 
-    uint8_t held      = inp->current & DPAD_MASK;
+    uint8_t held = inp->current & DPAD_MASK;
     uint8_t prev_held = prev & DPAD_MASK;
 
     if (held != prev_held) {
