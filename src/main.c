@@ -122,8 +122,9 @@ void main(void) {
     board_draw(b, BOARD_BKG_X, BOARD_BKG_Y);
 
     /* Initialize the cursor at the center of the board. */
-    cursor_init(game_cursor, b->width / 2, b->height / 2);
-    cursor_draw(game_cursor, BOARD_BKG_X, BOARD_BKG_Y);
+    cursor_init(game_cursor, b->width / 2, b->height / 2, BOARD_BKG_X,
+                BOARD_BKG_Y);
+    cursor_draw(game_cursor);
 
     SHOW_BKG;
     SHOW_SPRITES;
@@ -132,7 +133,7 @@ void main(void) {
     while (1) {
         vsync();
         input_poll(game_input);
-        cursor_update(game_cursor, game_input, b);
-        cursor_draw(game_cursor, BOARD_BKG_X, BOARD_BKG_Y);
+        cursor_update(game_cursor, game_input, b, BOARD_BKG_X, BOARD_BKG_Y);
+        cursor_draw(game_cursor);
     }
 }

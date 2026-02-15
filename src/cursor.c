@@ -4,9 +4,47 @@
 #include "cursor.h"
 #include "layout.h"
 
-void cursor_init(cursor_t *c, uint8_t col, uint8_t row) {
+/* Compute target screen X as fixed-point 8.8. */
+static uint16_t target_x(uint8_t col, uint8_t bkg_x) {
+    return (uint16_t)((bkg_x + col) * 8 + 8) << 8;
+}
+
+/* Compute target screen Y as fixed-point 8.8. */
+static uint16_t target_y(uint8_t row, uint8_t bkg_y) {
+    return (uint16_t)((bkg_y + row) * 8 + 16) << 8;
+}
+
+/* Move `cur` toward `tgt` with exponential tracking.
+ * Clamps to CURSOR_MIN_STEP to avoid slow crawl, but never overshoots. */
+static uint16_t track(uint16_t cur, uint16_t tgt) {
+    int16_t delta = (int16_t)(tgt - cur);
+    if (delta == 0)
+        return cur;
+
+    int16_t step = (delta >> 3) + (delta >> 4); /* 3/16 per frame */
+
+    /* Clamp: at least MIN_STEP toward target, but never overshoot. */
+    if (delta > 0) {
+        if (step < CURSOR_MIN_STEP)
+            step = CURSOR_MIN_STEP;
+        if (step > delta)
+            step = delta;
+    } else {
+        if (step > -CURSOR_MIN_STEP)
+            step = -CURSOR_MIN_STEP;
+        if (step < delta)
+            step = delta;
+    }
+    return cur + step;
+}
+
+void cursor_init(cursor_t *c, uint8_t col, uint8_t row, uint8_t bkg_x,
+                 uint8_t bkg_y) {
     c->col = col;
     c->row = row;
+    c->spread = 0;
+    c->x = target_x(col, bkg_x);
+    c->y = target_y(row, bkg_y);
 
     /* Assign the cursor tile to all 4 corner sprites. */
     set_sprite_tile(CURSOR_SPR_UL, TILE_CURSOR);
@@ -21,7 +59,8 @@ void cursor_init(cursor_t *c, uint8_t col, uint8_t row) {
     set_sprite_prop(CURSOR_SPR_LR, S_FLIPX | S_FLIPY);
 }
 
-void cursor_update(cursor_t *c, const input_t *inp, const board_t *b) {
+void cursor_update(cursor_t *c, const input_t *inp, const board_t *b,
+                   uint8_t bkg_x, uint8_t bkg_y) {
     uint8_t trigger = inp->pressed | inp->repeated;
 
     if ((trigger & J_LEFT) && c->col > 0)
@@ -32,16 +71,39 @@ void cursor_update(cursor_t *c, const input_t *inp, const board_t *b) {
         c->row--;
     if ((trigger & J_DOWN) && c->row < b->height - 1)
         c->row++;
+
+    /* Smooth tracking toward target pixel position. */
+    uint16_t tx = target_x(c->col, bkg_x);
+    uint16_t ty = target_y(c->row, bkg_y);
+    c->x = track(c->x, tx);
+    c->y = track(c->y, ty);
+
+    /* Sprite spread: floor at 2 while d-pad held with room to move,
+     * otherwise decay based on remaining distance to target. */
+    uint8_t held = inp->current & (J_LEFT | J_RIGHT | J_UP | J_DOWN);
+    if ((held & J_LEFT && c->col > 0) ||
+        (held & J_RIGHT && c->col < b->width - 1) ||
+        (held & J_UP && c->row > 0) ||
+        (held & J_DOWN && c->row < b->height - 1)) {
+        c->spread = 2;
+    } else {
+        int16_t dx = (int16_t)(tx - c->x);
+        int16_t dy = (int16_t)(ty - c->y);
+        uint16_t adx = dx < 0 ? (uint16_t)(-dx) : (uint16_t)dx;
+        uint16_t ady = dy < 0 ? (uint16_t)(-dy) : (uint16_t)dy;
+        uint16_t dist = adx > ady ? adx : ady;
+        uint8_t s = dist >> CURSOR_SPREAD_SHIFT;
+        c->spread = s > 2 ? 2 : s;
+    }
 }
 
-void cursor_draw(const cursor_t *c, uint8_t bkg_x, uint8_t bkg_y) {
-    /* Screen pixel position of the board cell.
-     * OAM X offset = 8, OAM Y offset = 16. */
-    uint8_t px = (bkg_x + c->col) * 8 + 8;
-    uint8_t py = (bkg_y + c->row) * 8 + 16;
+void cursor_draw(const cursor_t *c) {
+    uint8_t px = (c->x + 128) >> 8;
+    uint8_t py = (c->y + 128) >> 8;
+    uint8_t s = c->spread;
 
-    move_sprite(CURSOR_SPR_UL, px, py);
-    move_sprite(CURSOR_SPR_UR, px + 1, py);
-    move_sprite(CURSOR_SPR_LL, px, py + 1);
-    move_sprite(CURSOR_SPR_LR, px + 1, py + 1);
+    move_sprite(CURSOR_SPR_UL, px - s, py - s);
+    move_sprite(CURSOR_SPR_UR, px + 1 + s, py - s);
+    move_sprite(CURSOR_SPR_LL, px - s, py + 1 + s);
+    move_sprite(CURSOR_SPR_LR, px + 1 + s, py + 1 + s);
 }
