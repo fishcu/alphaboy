@@ -20,15 +20,12 @@ typedef struct cursor {
     uint16_t y;     /* current screen Y, fixed-point 8.8     */
 } cursor_t;
 
-/* Initialize cursor at (col, row), snap position, set up OAM sprites.
- * bkg_x/bkg_y: board origin on the BG tilemap (in tiles). */
-void cursor_init(cursor_t *c, uint8_t col, uint8_t row, uint8_t bkg_x,
-                 uint8_t bkg_y);
+/* Initialize cursor at (col, row), snap position, set up OAM sprites. */
+void cursor_init(cursor_t *c, uint8_t col, uint8_t row, const game_t *g);
 
 /* Move cursor based on input, then animate toward target.
  * Call once per frame after input_poll. */
-void cursor_update(cursor_t *c, const input_t *inp, const game_t *g,
-                   uint8_t bkg_x, uint8_t bkg_y);
+void cursor_update(cursor_t *c, const input_t *inp, const game_t *g);
 
 /* Update OAM positions from current smoothed coordinates. */
 void cursor_draw(const cursor_t *c);

@@ -84,12 +84,8 @@
 /*  Screen / board positioning                                        */
 /* ------------------------------------------------------------------ */
 
-#define SCREEN_W 20
-#define SCREEN_H 18
-
-/* Board draw position on the BG tilemap (in tiles). */
-#define BOARD_BKG_X 1
-#define BOARD_BKG_Y 1
+#define SCREEN_W 20 /* screen width in tiles  (160 px) */
+#define SCREEN_H 18 /* screen height in tiles (144 px) */
 
 /* ------------------------------------------------------------------ */
 /*  OAM sprite allocation                                             */

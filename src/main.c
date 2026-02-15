@@ -42,7 +42,7 @@ static uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
 /* Write BG tilemap entries from the current board state.
  * Iterates the board row by row, choosing stone tiles or the
  * appropriate board-surface tile for each intersection. */
-static void board_draw(const game_t *g, uint8_t bkg_x, uint8_t bkg_y) {
+static void board_draw(const game_t *g) {
     uint8_t w = g->width;
     uint8_t h = g->height;
     uint16_t pos = BOARD_COORD(0, 0);
@@ -59,7 +59,7 @@ static void board_draw(const game_t *g, uint8_t bkg_x, uint8_t bkg_y) {
                 row_buf[col] = surface_tile(col, row, w, h);
             p++;
         }
-        set_bkg_tiles(bkg_x, bkg_y + row, w, 1, row_buf);
+        set_bkg_tiles(0, row, w, 1, row_buf);
         pos += BOARD_MAX_EXTENT;
     }
 }
@@ -101,16 +101,21 @@ void main(void) {
 
     /* Initialize and draw the board. */
     game_t *g = game_state;
-    game_reset(g, 9, 9, 13);
+    game_reset(g, 19, 17, 13);
 
 #ifndef NDEBUG
     game_debug_print(g);
 #endif
-    board_draw(g, BOARD_BKG_X, BOARD_BKG_Y);
+    board_draw(g);
+
+    /* Center the board on screen via BG scroll registers.
+     * Board is drawn at BG tile (0,0); the 256x256 BG wraps around,
+     * so the negative offset shows blank (black) tiles as margin. */
+    SCX_REG = (uint8_t)(-(int16_t)((SCREEN_W - g->width) * 4));
+    SCY_REG = (uint8_t)(-(int16_t)((SCREEN_H - g->height) * 4));
 
     /* Initialize the cursor at the center of the board. */
-    cursor_init(game_cursor, g->width / 2, g->height / 2, BOARD_BKG_X,
-                BOARD_BKG_Y);
+    cursor_init(game_cursor, g->width / 2, g->height / 2, g);
     cursor_draw(game_cursor);
 
     SHOW_BKG;
@@ -120,7 +125,7 @@ void main(void) {
     while (1) {
         vsync();
         input_poll(game_input);
-        cursor_update(game_cursor, game_input, g, BOARD_BKG_X, BOARD_BKG_Y);
+        cursor_update(game_cursor, game_input, g);
         cursor_draw(game_cursor);
     }
 }

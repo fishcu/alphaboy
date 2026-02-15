@@ -4,14 +4,19 @@
 #include "cursor.h"
 #include "layout.h"
 
-/* Compute target screen X as fixed-point 8.8. */
-static uint16_t target_x(uint8_t col, uint8_t bkg_x) {
-    return (uint16_t)((bkg_x + col) * 8 + 8) << 8;
+/* Compute target OAM X as fixed-point 8.8.
+ * Board is drawn at BG tile (0,0) and centered via scroll registers.
+ * OAM X = screen_offset + col*8 + 8 (OAM hardware offset). */
+static uint16_t target_x(uint8_t col, uint8_t board_w) {
+    uint8_t offset = (SCREEN_W - board_w) * 4;
+    return (uint16_t)(offset + col * 8 + 8) << 8;
 }
 
-/* Compute target screen Y as fixed-point 8.8. */
-static uint16_t target_y(uint8_t row, uint8_t bkg_y) {
-    return (uint16_t)((bkg_y + row) * 8 + 16) << 8;
+/* Compute target OAM Y as fixed-point 8.8.
+ * OAM Y = screen_offset + row*8 + 16 (OAM hardware offset). */
+static uint16_t target_y(uint8_t row, uint8_t board_h) {
+    uint8_t offset = (SCREEN_H - board_h) * 4;
+    return (uint16_t)(offset + row * 8 + 16) << 8;
 }
 
 /* Move `cur` toward `tgt` with exponential tracking.
@@ -38,13 +43,12 @@ static uint16_t track(uint16_t cur, uint16_t tgt) {
     return cur + step;
 }
 
-void cursor_init(cursor_t *c, uint8_t col, uint8_t row, uint8_t bkg_x,
-                 uint8_t bkg_y) {
+void cursor_init(cursor_t *c, uint8_t col, uint8_t row, const game_t *g) {
     c->col = col;
     c->row = row;
     c->spread = 0;
-    c->x = target_x(col, bkg_x);
-    c->y = target_y(row, bkg_y);
+    c->x = target_x(col, g->width);
+    c->y = target_y(row, g->height);
 
     /* Assign the cursor tile to all 4 corner sprites. */
     set_sprite_tile(CURSOR_SPR_UL, TILE_CURSOR);
@@ -59,8 +63,7 @@ void cursor_init(cursor_t *c, uint8_t col, uint8_t row, uint8_t bkg_x,
     set_sprite_prop(CURSOR_SPR_LR, S_FLIPX | S_FLIPY);
 }
 
-void cursor_update(cursor_t *c, const input_t *inp, const game_t *g,
-                   uint8_t bkg_x, uint8_t bkg_y) {
+void cursor_update(cursor_t *c, const input_t *inp, const game_t *g) {
     uint8_t trigger = inp->pressed | inp->repeated;
 
     if ((trigger & J_LEFT) && c->col > 0)
@@ -73,8 +76,8 @@ void cursor_update(cursor_t *c, const input_t *inp, const game_t *g,
         c->row++;
 
     /* Smooth tracking toward target pixel position. */
-    uint16_t tx = target_x(c->col, bkg_x);
-    uint16_t ty = target_y(c->row, bkg_y);
+    uint16_t tx = target_x(c->col, g->width);
+    uint16_t ty = target_y(c->row, g->height);
     c->x = track(c->x, tx);
     c->y = track(c->y, ty);
 
