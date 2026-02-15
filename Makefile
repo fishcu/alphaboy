@@ -20,8 +20,16 @@ PROJECTNAME = alphaboy
 
 SRCDIR   = src
 RESDIR   = res
-OBJDIR   = obj
-BUILDDIR = build
+
+# Debug is the default; pass RELEASE=1 for an optimized build.
+ifdef RELEASE
+    VARIANT  = release
+else
+    VARIANT  = debug
+endif
+
+OBJDIR   = obj/$(VARIANT)
+BUILDDIR = build/$(VARIANT)
 
 BINS       = $(BUILDDIR)/$(PROJECTNAME).gb
 
@@ -37,10 +45,10 @@ OBJS += $(ASMSOURCES:%.s=$(OBJDIR)/%.o)
 # MBC5 + RAM + Battery (cart type 0x1B), 1 RAM bank (8 KB)
 LCCFLAGS = -Wm-yt0x1B -Wm-ya1
 
-ifdef GBDK_DEBUG
-	LCCFLAGS += -debug -v
-else
+ifdef RELEASE
 	LCCFLAGS += -DNDEBUG
+else
+	LCCFLAGS += -debug -v
 endif
 
 # ---- Targets ----
@@ -73,8 +81,13 @@ $(RESDIR)/tiles.c: assets/tiles.png
 # ---- Utility targets ----
 
 dirs:
+ifeq ($(OS),Windows_NT)
+	-$(MKDIR) $(subst /,\,$(OBJDIR))
+	-$(MKDIR) $(subst /,\,$(BUILDDIR))
+else
 	-$(MKDIR) $(OBJDIR)
 	-$(MKDIR) $(BUILDDIR)
+endif
 
 # ---- Emulator ----
 # BGB writes debug messages to DEBUGMSG (DebugMsgFile=1 in bgb.ini).
@@ -97,7 +110,7 @@ else
 endif
 
 clean:
-	-$(RMDIR) $(OBJDIR)
-	-$(RMDIR) $(BUILDDIR)
+	-$(RMDIR) obj
+	-$(RMDIR) build
 
 .PHONY: all dirs assets run clean
