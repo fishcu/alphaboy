@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "board.h"
+#include "go.h"
 #include "cursor.h"
 #include "input.h"
 
@@ -38,12 +38,12 @@
 
 #define SRAM_BASE 0xA000u
 
-#define game_board ((board_t *)SRAM_BASE)
+#define game_state ((game_t *)SRAM_BASE)
 
-#define game_input ((input_t *)(SRAM_BASE + sizeof(board_t)))
+#define game_input ((input_t *)(SRAM_BASE + sizeof(game_t)))
 
 #define game_cursor                                                            \
-    ((cursor_t *)(SRAM_BASE + sizeof(board_t) + sizeof(input_t)))
+    ((cursor_t *)(SRAM_BASE + sizeof(game_t) + sizeof(input_t)))
 
 /* ------------------------------------------------------------------ */
 /*  Palette helper                                                    */

@@ -1,7 +1,7 @@
 #ifndef CURSOR_H
 #define CURSOR_H
 
-#include "board.h"
+#include "go.h"
 #include "input.h"
 #include <stdint.h>
 
@@ -27,7 +27,7 @@ void cursor_init(cursor_t *c, uint8_t col, uint8_t row, uint8_t bkg_x,
 
 /* Move cursor based on input, then animate toward target.
  * Call once per frame after input_poll. */
-void cursor_update(cursor_t *c, const input_t *inp, const board_t *b,
+void cursor_update(cursor_t *c, const input_t *inp, const game_t *g,
                    uint8_t bkg_x, uint8_t bkg_y);
 
 /* Update OAM positions from current smoothed coordinates. */

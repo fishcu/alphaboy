@@ -42,18 +42,18 @@ static uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
 /* Write BG tilemap entries from the current board state.
  * Iterates the board row by row, choosing stone tiles or the
  * appropriate board-surface tile for each intersection. */
-static void board_draw(const board_t *b, uint8_t bkg_x, uint8_t bkg_y) {
-    uint8_t w = b->width;
-    uint8_t h = b->height;
+static void board_draw(const game_t *g, uint8_t bkg_x, uint8_t bkg_y) {
+    uint8_t w = g->width;
+    uint8_t h = g->height;
     uint16_t pos = BOARD_COORD(0, 0);
     uint8_t row_buf[BOARD_MAX_SIZE];
 
     for (uint8_t row = 0; row < h; row++) {
         uint16_t p = pos;
         for (uint8_t col = 0; col < w; col++) {
-            if (BF_GET(b->black_stones, p))
+            if (BF_GET(g->black_stones, p))
                 row_buf[col] = TILE_STONE_B;
-            else if (BF_GET(b->white_stones, p))
+            else if (BF_GET(g->white_stones, p))
                 row_buf[col] = TILE_STONE_W;
             else
                 row_buf[col] = surface_tile(col, row, w, h);
@@ -100,29 +100,16 @@ void main(void) {
     memset(game_input, 0, sizeof(input_t));
 
     /* Initialize and draw the board. */
-    board_t *b = game_board;
-    board_reset(b, 13, 9);
-
-    /* A small opening for display purposes. */
-    BF_SET(b->black_stones, BOARD_COORD(3, 3));
-    BF_SET(b->black_stones, BOARD_COORD(3, 5));
-    BF_SET(b->black_stones, BOARD_COORD(4, 4));
-    BF_SET(b->black_stones, BOARD_COORD(9, 3));
-    BF_SET(b->black_stones, BOARD_COORD(9, 5));
-
-    BF_SET(b->white_stones, BOARD_COORD(6, 3));
-    BF_SET(b->white_stones, BOARD_COORD(6, 4));
-    BF_SET(b->white_stones, BOARD_COORD(6, 5));
-    BF_SET(b->white_stones, BOARD_COORD(3, 4));
-    BF_SET(b->white_stones, BOARD_COORD(10, 4));
+    game_t *g = game_state;
+    game_reset(g, 9, 9, 13);
 
 #ifndef NDEBUG
-    board_debug_print(b);
+    game_debug_print(g);
 #endif
-    board_draw(b, BOARD_BKG_X, BOARD_BKG_Y);
+    board_draw(g, BOARD_BKG_X, BOARD_BKG_Y);
 
     /* Initialize the cursor at the center of the board. */
-    cursor_init(game_cursor, b->width / 2, b->height / 2, BOARD_BKG_X,
+    cursor_init(game_cursor, g->width / 2, g->height / 2, BOARD_BKG_X,
                 BOARD_BKG_Y);
     cursor_draw(game_cursor);
 
@@ -133,7 +120,7 @@ void main(void) {
     while (1) {
         vsync();
         input_poll(game_input);
-        cursor_update(game_cursor, game_input, b, BOARD_BKG_X, BOARD_BKG_Y);
+        cursor_update(game_cursor, game_input, g, BOARD_BKG_X, BOARD_BKG_Y);
         cursor_draw(game_cursor);
     }
 }

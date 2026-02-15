@@ -59,17 +59,17 @@ void cursor_init(cursor_t *c, uint8_t col, uint8_t row, uint8_t bkg_x,
     set_sprite_prop(CURSOR_SPR_LR, S_FLIPX | S_FLIPY);
 }
 
-void cursor_update(cursor_t *c, const input_t *inp, const board_t *b,
+void cursor_update(cursor_t *c, const input_t *inp, const game_t *g,
                    uint8_t bkg_x, uint8_t bkg_y) {
     uint8_t trigger = inp->pressed | inp->repeated;
 
     if ((trigger & J_LEFT) && c->col > 0)
         c->col--;
-    if ((trigger & J_RIGHT) && c->col < b->width - 1)
+    if ((trigger & J_RIGHT) && c->col < g->width - 1)
         c->col++;
     if ((trigger & J_UP) && c->row > 0)
         c->row--;
-    if ((trigger & J_DOWN) && c->row < b->height - 1)
+    if ((trigger & J_DOWN) && c->row < g->height - 1)
         c->row++;
 
     /* Smooth tracking toward target pixel position. */
@@ -82,9 +82,9 @@ void cursor_update(cursor_t *c, const input_t *inp, const board_t *b,
      * otherwise decay based on remaining distance to target. */
     uint8_t held = inp->current & (J_LEFT | J_RIGHT | J_UP | J_DOWN);
     if ((held & J_LEFT && c->col > 0) ||
-        (held & J_RIGHT && c->col < b->width - 1) ||
+        (held & J_RIGHT && c->col < g->width - 1) ||
         (held & J_UP && c->row > 0) ||
-        (held & J_DOWN && c->row < b->height - 1)) {
+        (held & J_DOWN && c->row < g->height - 1)) {
         c->spread = 2;
     } else {
         int16_t dx = (int16_t)(tx - c->x);
