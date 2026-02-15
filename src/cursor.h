@@ -1,13 +1,14 @@
 #ifndef CURSOR_H
 #define CURSOR_H
 
-#include <stdint.h>
 #include "board.h"
 #include "input.h"
+#include <stdint.h>
+
 
 typedef struct cursor {
-    uint8_t col;  /* board column [0, board.width)  */
-    uint8_t row;  /* board row    [0, board.height) */
+    uint8_t col; /* board column [0, board.width)  */
+    uint8_t row; /* board row    [0, board.height) */
 } cursor_t;
 
 /* Initialize cursor at (col, row) and set up OAM sprite entries. */

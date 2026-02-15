@@ -24,13 +24,13 @@ void cursor_init(cursor_t *c, uint8_t col, uint8_t row) {
 void cursor_update(cursor_t *c, const input_t *inp, const board_t *b) {
     uint8_t pressed = inp->pressed;
 
-    if ((pressed & J_LEFT)  && c->col > 0)
+    if ((pressed & J_LEFT) && c->col > 0)
         c->col--;
     if ((pressed & J_RIGHT) && c->col < b->width - 1)
         c->col++;
-    if ((pressed & J_UP)    && c->row > 0)
+    if ((pressed & J_UP) && c->row > 0)
         c->row--;
-    if ((pressed & J_DOWN)  && c->row < b->height - 1)
+    if ((pressed & J_DOWN) && c->row < b->height - 1)
         c->row++;
 }
 
@@ -40,8 +40,8 @@ void cursor_draw(const cursor_t *c, uint8_t bkg_x, uint8_t bkg_y) {
     uint8_t px = (bkg_x + c->col) * 8 + 8;
     uint8_t py = (bkg_y + c->row) * 8 + 16;
 
-    move_sprite(CURSOR_SPR_UL, px,     py);
+    move_sprite(CURSOR_SPR_UL, px, py);
     move_sprite(CURSOR_SPR_UR, px + 1, py);
-    move_sprite(CURSOR_SPR_LL, px,     py + 1);
+    move_sprite(CURSOR_SPR_LL, px, py + 1);
     move_sprite(CURSOR_SPR_LR, px + 1, py + 1);
 }

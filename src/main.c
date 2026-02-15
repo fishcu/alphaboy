@@ -7,27 +7,35 @@
 #include "layout.h"
 
 /* Blank tile: 16 zero bytes = all pixels at color index 0 (black). */
-static const uint8_t blank_tile[16] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+static const uint8_t blank_tile[16] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                       0xFF, 0xFF, 0xFF, 0xFF};
 
 /* Return the board-surface tile for an empty intersection. */
 static uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
-    uint8_t top    = (row == 0);
+    uint8_t top = (row == 0);
     uint8_t bottom = (row == h - 1);
-    uint8_t left   = (col == 0);
-    uint8_t right  = (col == w - 1);
+    uint8_t left = (col == 0);
+    uint8_t right = (col == w - 1);
 
     if (top) {
-        if (left)  return TILE_CORNER_TL;
-        if (right) return TILE_CORNER_TR;
+        if (left)
+            return TILE_CORNER_TL;
+        if (right)
+            return TILE_CORNER_TR;
         return TILE_EDGE_T;
     }
     if (bottom) {
-        if (left)  return TILE_CORNER_BL;
-        if (right) return TILE_CORNER_BR;
+        if (left)
+            return TILE_CORNER_BL;
+        if (right)
+            return TILE_CORNER_BR;
         return TILE_EDGE_B;
     }
-    if (left)  return TILE_EDGE_L;
-    if (right) return TILE_EDGE_R;
+    if (left)
+        return TILE_EDGE_L;
+    if (right)
+        return TILE_EDGE_R;
     return TILE_CENTER;
 }
 
@@ -43,13 +51,12 @@ static void board_draw(const board_t *b, uint8_t bkg_x, uint8_t bkg_y) {
     for (uint8_t row = 0; row < h; row++) {
         uint16_t p = pos;
         for (uint8_t col = 0; col < w; col++) {
-            if (BF_GET(b->black_stones, p)) {
+            if (BF_GET(b->black_stones, p))
                 row_buf[col] = TILE_STONE_B;
-            } else if (BF_GET(b->white_stones, p)) {
+            else if (BF_GET(b->white_stones, p))
                 row_buf[col] = TILE_STONE_W;
-            } else {
+            else
                 row_buf[col] = surface_tile(col, row, w, h);
-            }
             p++;
         }
         set_bkg_tiles(bkg_x, bkg_y + row, w, 1, row_buf);
@@ -61,9 +68,8 @@ static void board_draw(const board_t *b, uint8_t bkg_x, uint8_t bkg_y) {
 static void fill_bkg(uint8_t tile) {
     uint8_t row[SCREEN_W];
     memset(row, tile, sizeof(row));
-    for (uint8_t y = 0; y < SCREEN_H; y++) {
+    for (uint8_t y = 0; y < SCREEN_H; y++)
         set_bkg_tiles(0, y, SCREEN_W, 1, row);
-    }
 }
 
 void main(void) {
@@ -79,7 +85,7 @@ void main(void) {
     /* DMG palettes: DMG_PAL(idx0, idx1, idx2, idx3)
      * Shades: 0=white, 1=light, 2=dark, 3=black.
      * Sprite index 0 is always transparent regardless of OBP value. */
-    BGP_REG  = DMG_PAL(0, 1, 2, 3);
+    BGP_REG = DMG_PAL(0, 1, 2, 3);
     OBP0_REG = DMG_PAL(0, 0, 3, 2);
 
     /* Load tiles to 0x8000 (shared BG + Sprite region). */

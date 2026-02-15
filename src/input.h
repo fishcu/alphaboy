@@ -4,8 +4,8 @@
 #include <stdint.h>
 
 typedef struct input {
-    uint8_t current;   /* buttons held this frame          */
-    uint8_t pressed;   /* buttons newly pressed this frame */
+    uint8_t current; /* buttons held this frame          */
+    uint8_t pressed; /* buttons newly pressed this frame */
 } input_t;
 
 /* Sample the joypad and update all derived fields.

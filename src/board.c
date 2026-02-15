@@ -8,13 +8,15 @@
 #endif
 
 void board_reset(board_t *b, uint8_t width, uint8_t height) {
-    assert(width  >= BOARD_MIN_SIZE && width  <= BOARD_MAX_SIZE && "width out of range");
-    assert(height >= BOARD_MIN_SIZE && height <= BOARD_MAX_SIZE && "height out of range");
+    assert(width >= BOARD_MIN_SIZE && width <= BOARD_MAX_SIZE &&
+           "width out of range");
+    assert(height >= BOARD_MIN_SIZE && height <= BOARD_MAX_SIZE &&
+           "height out of range");
 
-    b->width  = width;
+    b->width = width;
     b->height = height;
 
-    memset(b->on_board,     0, BOARD_FIELD_BYTES);
+    memset(b->on_board, 0, BOARD_FIELD_BYTES);
     memset(b->black_stones, 0, BOARD_FIELD_BYTES);
     memset(b->white_stones, 0, BOARD_FIELD_BYTES);
 
@@ -47,14 +49,14 @@ void board_debug_print(const board_t *b) {
         uint16_t p = pos;
         uint8_t idx = 0;
         for (uint8_t col = 0; col < w; col++) {
-            if (col > 0) row_str[idx++] = ' ';
-            if (BF_GET(b->black_stones, p)) {
+            if (col > 0)
+                row_str[idx++] = ' ';
+            if (BF_GET(b->black_stones, p))
                 row_str[idx++] = 'X';
-            } else if (BF_GET(b->white_stones, p)) {
+            else if (BF_GET(b->white_stones, p))
                 row_str[idx++] = 'O';
-            } else {
+            else
                 row_str[idx++] = '.';
-            }
             p++;
         }
         row_str[idx] = '\0';
