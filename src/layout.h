@@ -44,6 +44,14 @@
 
 #define game_cursor ((cursor_t *)(SRAM_BASE + sizeof(game_t) + sizeof(input_t)))
 
+#define flood_stack                                                            \
+    ((uint16_t *)(SRAM_BASE + sizeof(game_t) + sizeof(input_t) +               \
+                  sizeof(cursor_t)))
+
+#define flood_visited                                                          \
+    ((uint8_t *)(SRAM_BASE + sizeof(game_t) + sizeof(input_t) +                \
+                 sizeof(cursor_t) + BOARD_POSITIONS * sizeof(uint16_t)))
+
 /* ------------------------------------------------------------------ */
 /*  Palette helper                                                    */
 /* ------------------------------------------------------------------ */

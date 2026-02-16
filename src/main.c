@@ -3,6 +3,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#ifndef NDEBUG
+#include <gbdk/emu_debug.h>
+#endif
+
 #include "../res/tiles.h"
 #include "layout.h"
 
@@ -166,6 +170,35 @@ void main(void) {
         LYC_REG = first_lyc;
 
         input_poll(game_input);
+
+        /* A button: play a stone at the cursor position. */
+        if (game_input->pressed & J_A) {
+            uint8_t color = g->move_count & 1;
+            uint16_t coord = BOARD_COORD(game_cursor->col, game_cursor->row);
+            move_legality_t result =
+                game_play_move(g, coord, color, flood_stack, flood_visited);
+
+            if (result == MOVE_LEGAL) {
+                board_draw(g);
+#ifndef NDEBUG
+                EMU_printf("Move %u: %s at (%hhu,%hhu)",
+                           (unsigned)g->move_count,
+                           (color == BLACK) ? "B" : "W", game_cursor->col,
+                           game_cursor->row);
+                game_debug_print(g);
+#endif
+            }
+#ifndef NDEBUG
+            else {
+                static const char *const reasons[] = {"legal", "non-empty",
+                                                      "suicidal", "ko"};
+                EMU_printf("Illegal (%s): %s at (%hhu,%hhu)", reasons[result],
+                           (color == BLACK) ? "B" : "W", game_cursor->col,
+                           game_cursor->row);
+            }
+#endif
+        }
+
         cursor_update(game_cursor, game_input, g);
         cursor_draw(game_cursor);
     }

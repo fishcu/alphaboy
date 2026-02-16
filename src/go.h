@@ -7,6 +7,9 @@
 #define BOARD_MIN_SIZE 5
 #define BOARD_MAX_SIZE 19
 
+/* Maximum number of playable intersections (BOARD_MAX_SIZE squared). */
+#define BOARD_POSITIONS (BOARD_MAX_SIZE * BOARD_MAX_SIZE)
+
 /* Margin on each side for sentinel/boundary detection. */
 #define BOARD_MARGIN 1
 #define BOARD_MAX_EXTENT (BOARD_MAX_SIZE + (BOARD_MARGIN * 2))
@@ -22,6 +25,15 @@
 #define BLACK 0
 #define WHITE 1
 #define COLOR_OPPOSITE(c) ((c) ^ 1)
+
+/* --- Move legality --- */
+
+typedef uint8_t move_legality_t;
+
+#define MOVE_LEGAL 0
+#define MOVE_NON_EMPTY 1
+#define MOVE_SUICIDAL 2
+#define MOVE_KO 3
 
 /* --- Coordinates and moves --- */
 
@@ -86,10 +98,25 @@ typedef struct game {
     move_t history[HISTORY_MAX]; /* packed move log for undo/replay    */
 } game_t;
 
+/* --- Neighbor offsets in the padded grid --- */
+
+#define DIR_UP (-(int16_t)BOARD_MAX_EXTENT)
+#define DIR_DOWN ((int16_t)BOARD_MAX_EXTENT)
+#define DIR_LEFT (-1)
+#define DIR_RIGHT (1)
+
 /* Reset game to an empty board of the given dimensions.
  * komi2 is 2*komi (e.g. 13 for 6.5 komi). Clears ko and history.
  * Asserts that width and height are in [BOARD_MIN_SIZE, BOARD_MAX_SIZE]. */
 void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2);
+
+/* Play a move at `coord` for `color`.  COORD_PASS is a valid pass move.
+ * `stack` and `visited` are scratch buffers for the flood-fill capture
+ * check; they must be large enough (BOARD_POSITIONS entries / one
+ * bitfield_t respectively).
+ * Returns a move_legality_t indicating whether the move was played. */
+move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color,
+                               uint16_t *stack, uint8_t *visited);
 
 #ifndef NDEBUG
 /* Print the board state to the emulator debug message window.

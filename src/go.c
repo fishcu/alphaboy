@@ -7,6 +7,49 @@
 #include <gbdk/emu_debug.h>
 #endif
 
+/* Four cardinal neighbor offsets in the padded grid. */
+static const int16_t dirs[4] = {DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT};
+
+/* ---- Flood fill for liberty detection ---- */
+
+/* Check whether the group containing `seed` has no liberties.
+ * `stones` is the bitfield of the color to follow (black or white).
+ * On return, if captured (return 1), `visited` marks every stone in
+ * the group.  If alive (return 0), `visited` is partial (early-out). */
+static uint8_t flood_fill_captured(const game_t *g, uint16_t seed,
+                                   const uint8_t *stones, uint8_t *visited,
+                                   uint16_t *stack) {
+    memset(visited, 0, BOARD_FIELD_BYTES);
+
+    uint16_t sp = 0;
+    stack[sp++] = seed;
+    BF_SET(visited, seed);
+
+    while (sp > 0) {
+        uint16_t pos = stack[--sp];
+
+        for (uint8_t d = 0; d < 4; d++) {
+            uint16_t nb = pos + dirs[d];
+
+            if (BF_GET(visited, nb))
+                continue;
+
+            if (BF_GET(stones, nb)) {
+                BF_SET(visited, nb);
+                stack[sp++] = nb;
+                continue;
+            }
+
+            /* Empty on-board neighbor = liberty → group is alive. */
+            if (BF_GET(g->on_board, nb) && !BF_GET(g->black_stones, nb) &&
+                !BF_GET(g->white_stones, nb))
+                return 0;
+        }
+    }
+
+    return 1; /* no liberties found → captured */
+}
+
 void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
     assert(width >= BOARD_MIN_SIZE && width <= BOARD_MAX_SIZE &&
            "width out of range");
@@ -36,6 +79,69 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
         }
         pos += BOARD_MAX_EXTENT;
     }
+}
+
+/* ---- Play a move ---- */
+
+move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color,
+                               uint16_t *stack, uint8_t *visited) {
+    /* Pass is always legal. */
+    if (coord == COORD_PASS) {
+        g->ko = COORD_PASS;
+        g->history[g->move_count++] = MOVE_MAKE(COORD_PASS, color);
+        return MOVE_LEGAL;
+    }
+
+    /* Ko check. */
+    if (coord == g->ko)
+        return MOVE_KO;
+
+    /* Must be an empty on-board intersection. */
+    if (!BF_GET(g->on_board, coord) || BF_GET(g->black_stones, coord) ||
+        BF_GET(g->white_stones, coord))
+        return MOVE_NON_EMPTY;
+
+    /* Place the stone (needed for correct liberty counting). */
+    uint8_t *own = (color == BLACK) ? g->black_stones : g->white_stones;
+    uint8_t *opp = (color == BLACK) ? g->white_stones : g->black_stones;
+    BF_SET(own, coord);
+
+    /* Check each adjacent opponent group for captures. */
+    uint16_t captured_total = 0;
+    uint16_t captured_at = COORD_PASS;
+
+    for (uint8_t d = 0; d < 4; d++) {
+        uint16_t nb = coord + dirs[d];
+
+        if (!BF_GET(opp, nb))
+            continue;
+
+        if (!flood_fill_captured(g, nb, opp, visited, stack))
+            continue;
+
+        /* Remove every stone in the captured group. */
+        for (uint16_t p = 0; p < BOARD_DATA_LEN; p++) {
+            if (!BF_GET(visited, p))
+                continue;
+            BF_CLR(opp, p);
+            captured_total++;
+            captured_at = p;
+        }
+    }
+
+    /* Ko: exactly one stone captured → record its position. */
+    g->ko = (captured_total == 1) ? captured_at : COORD_PASS;
+
+    /* Suicide check: if nothing was captured, the placed stone's own
+     * group must have at least one liberty. */
+    if (captured_total == 0 &&
+        flood_fill_captured(g, coord, own, visited, stack)) {
+        BF_CLR(own, coord);
+        return MOVE_SUICIDAL;
+    }
+
+    g->history[g->move_count++] = MOVE_MAKE(coord, color);
+    return MOVE_LEGAL;
 }
 
 #ifndef NDEBUG
