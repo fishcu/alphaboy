@@ -43,27 +43,40 @@ static uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
     return TILE_CENTER;
 }
 
+/* ---- Lightweight VRAM tile write ----
+ * Writes one byte to the BG tilemap without disabling interrupts.
+ * Waits for VRAM-accessible mode (HBlank or VBlank), then stores.
+ * A single byte store completes in 1 M-cycle (4 clocks), well
+ * within any VRAM-accessible window. */
+static void vram_set_tile(uint8_t x, uint8_t y, uint8_t tile) {
+    volatile uint8_t *addr =
+        (volatile uint8_t *)(0x9800u + ((uint16_t)y << 5) + x);
+    while (STAT_REG & STATF_BUSY) {
+    }
+    *addr = tile;
+}
+
 /* Write BG tilemap entries from the current board state.
- * Iterates the board row by row, choosing stone tiles or the
- * appropriate board-surface tile for each intersection. */
+ * Uses vram_set_tile for each cell so interrupts stay enabled
+ * and the LYC compression chain is never disrupted. */
 static void board_draw(const game_t *g) {
     uint8_t w = g->width;
     uint8_t h = g->height;
     uint16_t pos = BOARD_COORD(0, 0);
-    uint8_t row_buf[BOARD_MAX_SIZE];
 
     for (uint8_t row = 0; row < h; row++) {
         uint16_t p = pos;
         for (uint8_t col = 0; col < w; col++) {
+            uint8_t tile;
             if (BF_GET(g->black_stones, p))
-                row_buf[col] = TILE_STONE_B;
+                tile = TILE_STONE_B;
             else if (BF_GET(g->white_stones, p))
-                row_buf[col] = TILE_STONE_W;
+                tile = TILE_STONE_W;
             else
-                row_buf[col] = surface_tile(col, row, w, h);
+                tile = surface_tile(col, row, w, h);
+            vram_set_tile(col, row, tile);
             p++;
         }
-        set_bkg_tiles(0, row, w, 1, row_buf);
         pos += BOARD_MAX_EXTENT;
     }
 }
@@ -82,16 +95,31 @@ static void fill_bkg(uint8_t tile) {
  * bumping SCY once per tile row via LYC-chained STAT interrupts.
  * The ISR waits for HBlank before writing so the change never
  * tears the scanline.  nowait_int_handler is added to the chain
- * to skip the dispatcher's default WAIT_STAT on exit. */
+ * to skip the dispatcher's default WAIT_STAT on exit.
+ *
+ * Compression covers the entire screen uniformly (not just the
+ * board area).  The ISR fires isr_line_count times during the
+ * visible frame; the (isr_line_count+1)th fire lands in VBlank
+ * where it resets SCY and LYC for the next frame.  Board
+ * centering is controlled solely by base_scy. */
 
 static uint8_t base_scy;
 static uint8_t first_lyc;
+static uint8_t isr_line_count; /* visible fires per frame (set once) */
+static uint8_t isr_counter;    /* fires since last reset              */
 
 static void lcd_isr(void) NONBANKED {
     while (STAT_REG & STATF_BUSY) {
     }
     SCY_REG++;
     LYC_REG += CELL_H;
+    if (isr_counter == isr_line_count) {
+        isr_counter = 0;
+        SCY_REG = base_scy;
+        LYC_REG = first_lyc;
+    } else {
+        isr_counter++;
+    }
 }
 
 void main(void) {
@@ -141,11 +169,12 @@ void main(void) {
     SCX_REG = (uint8_t)(-(int16_t)offset_x);
     base_scy = (uint8_t)(-(int16_t)offset_y);
     first_lyc = offset_y - 1;
+    isr_line_count = (143 - first_lyc) / CELL_H + 1;
+    isr_counter = 0;
     SCY_REG = base_scy;
 
     /* Install the LYC-chained ISR via the GBDK dispatcher.
-     * nowait_int_handler skips the dispatcher's WAIT_STAT on exit,
-     * saving ~15 cycles per invocation. */
+     * nowait_int_handler skips the dispatcher's WAIT_STAT on exit. */
     LYC_REG = first_lyc;
     CRITICAL {
         STAT_REG |= STATF_LYC;
@@ -164,11 +193,6 @@ void main(void) {
 
     while (1) {
         vsync();
-
-        /* Reset scroll and LYC for the new frame. */
-        SCY_REG = base_scy;
-        LYC_REG = first_lyc;
-
         input_poll(game_input);
 
         /* A button: play a stone at the cursor position. */
