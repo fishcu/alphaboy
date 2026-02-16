@@ -109,8 +109,13 @@ else
 	$(BGB) $(BINS)
 endif
 
+# ---- Formatting ----
+
+format:
+	clang-format -i $(wildcard $(SRCDIR)/*.c $(SRCDIR)/*.h $(RESDIR)/*.c $(RESDIR)/*.h)
+
 clean:
 	-$(RMDIR) obj
 	-$(RMDIR) build
 
-.PHONY: all dirs assets run clean
+.PHONY: all dirs assets run format clean

@@ -83,7 +83,7 @@ static void fill_bkg(uint8_t tile) {
 static uint8_t base_scy;
 static uint8_t first_lyc;
 
-static void lcd_isr(void) {
+static void lcd_isr(void) NONBANKED {
     while (STAT_REG & STATF_BUSY) {
     }
     SCY_REG++;

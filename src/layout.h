@@ -7,7 +7,6 @@
 #include "go.h"
 #include "input.h"
 
-
 /*
  * Memory Layout
  * =============
