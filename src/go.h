@@ -61,8 +61,11 @@ typedef uint16_t move_t;
 /* Return the byte index for bit position `pos`. */
 #define BF_BYTE(pos) ((pos) >> 3)
 
+/* Bit-field mask lookup table (avoids variable shifts on SM83). */
+extern const uint8_t bf_masks[8];
+
 /* Return the bit mask for bit position `pos` within its byte. */
-#define BF_MASK(pos) (1u << ((pos)&7))
+#define BF_MASK(pos) (bf_masks[(pos)&7])
 
 /* Test whether bit `pos` is set in field `f`. */
 #define BF_GET(f, pos) ((f)[BF_BYTE(pos)] & BF_MASK(pos))
@@ -71,7 +74,7 @@ typedef uint16_t move_t;
 #define BF_SET(f, pos) ((f)[BF_BYTE(pos)] |= BF_MASK(pos))
 
 /* Clear bit `pos` in field `f`. */
-#define BF_CLR(f, pos) ((f)[BF_BYTE(pos)] &= ~BF_MASK(pos))
+#define BF_CLR(f, pos) ((f)[BF_BYTE(pos)] &= (uint8_t)~BF_MASK(pos))
 
 /* --- Coordinate helpers --- */
 
@@ -112,12 +115,12 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2);
 
 /* Play a move at (col, row) for `color`.  Updates the board state and
  * writes changed tiles to VRAM incrementally (via vram_set_tile).
- * `stack` and `visited` are scratch buffers for the flood-fill capture
+ * `queue` and `visited` are scratch buffers for the flood-fill capture
  * check; they must be large enough (BOARD_POSITIONS entries / one
  * bitfield_t respectively).
  * Returns a move_legality_t indicating whether the move was played. */
 move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
-                               uint8_t color, uint16_t *stack,
+                               uint8_t color, uint16_t *queue,
                                uint8_t *visited);
 
 #ifndef NDEBUG

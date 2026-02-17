@@ -8,26 +8,34 @@
 #include <gbdk/emu_debug.h>
 #endif
 
+/* Bit-field mask lookup table. */
+const uint8_t bf_masks[8] = {1, 2, 4, 8, 16, 32, 64, 128};
+
 /* Four cardinal neighbor offsets in the padded grid. */
 static const int16_t dirs[4] = {DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT};
 
 /* ---- Flood fill for liberty detection ---- */
 
-/* Check whether the group containing `seed` has no liberties.
+/* Flood-fill the group containing `seed`, recording every stone in
+ * `queue[0..*group_size-1]`.  Uses BFS to fully traverse the group
+ * (no early-out) so that `visited` stays complete across calls.
  * `stones` is the bitfield of the color to follow (black or white).
- * On return, if captured (return 1), `visited` marks every stone in
- * the group.  If alive (return 0), `visited` is partial (early-out). */
+ * Precondition: seed must not already be in `visited`.
+ * Returns 1 if captured (no liberties), 0 if alive. */
 static uint8_t flood_fill_captured(const game_t *g, uint16_t seed,
                                    const uint8_t *stones, uint8_t *visited,
-                                   uint16_t *stack) {
-    memset(visited, 0, BOARD_FIELD_BYTES);
+                                   uint16_t *queue, uint16_t *group_size) {
+    assert(!BF_GET(visited, seed) && "seed already visited");
 
-    uint16_t sp = 0;
-    stack[sp++] = seed;
+    uint16_t head = 0;
+    uint16_t tail = 0;
+    uint8_t has_liberty = 0;
+
+    queue[tail++] = seed;
     BF_SET(visited, seed);
 
-    while (sp > 0) {
-        uint16_t pos = stack[--sp];
+    while (head < tail) {
+        uint16_t pos = queue[head++];
 
         for (uint8_t d = 0; d < 4; d++) {
             uint16_t nb = pos + dirs[d];
@@ -37,18 +45,19 @@ static uint8_t flood_fill_captured(const game_t *g, uint16_t seed,
 
             if (BF_GET(stones, nb)) {
                 BF_SET(visited, nb);
-                stack[sp++] = nb;
+                queue[tail++] = nb;
                 continue;
             }
 
-            /* Empty on-board neighbor = liberty → group is alive. */
-            if (BF_GET(g->on_board, nb) && !BF_GET(g->black_stones, nb) &&
-                !BF_GET(g->white_stones, nb))
-                return 0;
+            /* Empty on-board neighbor = liberty. */
+            if (!has_liberty && BF_GET(g->on_board, nb) &&
+                !BF_GET(g->black_stones, nb) && !BF_GET(g->white_stones, nb))
+                has_liberty = 1;
         }
     }
 
-    return 1; /* no liberties found → captured */
+    *group_size = tail;
+    return !has_liberty;
 }
 
 void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
@@ -84,28 +93,25 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
 
 /* ---- Play a move ---- */
 
-/* Remove captured stones marked in `visited`, update tiles to the
- * appropriate surface tile, and accumulate the capture count/position. */
-static void remove_captured(game_t *g, uint8_t *opp, const uint8_t *visited,
-                            uint16_t *captured_total, uint16_t *captured_at) {
-    uint16_t rp = BOARD_COORD(0, 0);
-    for (uint8_t r = 0; r < g->height; r++) {
-        uint16_t p = rp;
-        for (uint8_t c = 0; c < g->width; c++) {
-            if (BF_GET(visited, p)) {
-                BF_CLR(opp, p);
-                vram_set_tile(c, r, surface_tile(c, r, g->width, g->height));
-                (*captured_total)++;
-                *captured_at = p;
-            }
-            p++;
-        }
-        rp += BOARD_MAX_EXTENT;
+/* Remove captured stones listed in `queue[0..group_size-1]`.
+ * Clears each stone from `opp`, writes the appropriate surface tile
+ * to VRAM, and accumulates the capture count/position for ko. */
+static void remove_captured(game_t *g, uint8_t *opp, const uint16_t *queue,
+                            uint16_t group_size, uint16_t *captured_total,
+                            uint16_t *captured_at) {
+    for (uint16_t i = 0; i < group_size; i++) {
+        uint16_t pos = queue[i];
+        BF_CLR(opp, pos);
+        uint8_t row = pos / BOARD_MAX_EXTENT - BOARD_MARGIN;
+        uint8_t col = pos % BOARD_MAX_EXTENT - BOARD_MARGIN;
+        vram_set_tile(col, row, surface_tile(col, row, g->width, g->height));
     }
+    *captured_total += group_size;
+    *captured_at = queue[0];
 }
 
 move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
-                               uint8_t color, uint16_t *stack,
+                               uint8_t color, uint16_t *queue,
                                uint8_t *visited) {
     uint16_t coord = BOARD_COORD(col, row);
 
@@ -133,9 +139,13 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
     uint8_t *opp = (color == BLACK) ? g->white_stones : g->black_stones;
     BF_SET(own, coord);
 
+    /* Clear visited once for all flood fills this move. */
+    memset(visited, 0, BOARD_FIELD_BYTES);
+
     /* Check each adjacent opponent group for captures. */
     uint16_t captured_total = 0;
     uint16_t captured_at = COORD_PASS;
+    uint16_t group_size;
 
     for (uint8_t d = 0; d < 4; d++) {
         uint16_t nb = coord + dirs[d];
@@ -143,20 +153,26 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
         if (!BF_GET(opp, nb))
             continue;
 
-        if (!flood_fill_captured(g, nb, opp, visited, stack))
+        /* Skip groups already explored by a prior direction. */
+        if (BF_GET(visited, nb))
             continue;
 
-        remove_captured(g, opp, visited, &captured_total, &captured_at);
+        if (!flood_fill_captured(g, nb, opp, visited, queue, &group_size))
+            continue;
+
+        remove_captured(g, opp, queue, group_size, &captured_total,
+                        &captured_at);
     }
 
     /* Ko: exactly one stone captured → record its position. */
     g->ko = (captured_total == 1) ? captured_at : COORD_PASS;
 
     /* Suicide check: if nothing was captured, the placed stone's own
-     * group must have at least one liberty.  Only the bitfield is
-     * undone — no VRAM write was made yet. */
+     * group must have at least one liberty.  Visited is not cleared —
+     * own and opponent stones are exclusive sets, so opponent marks
+     * in visited cannot interfere with the own-color flood. */
     if (captured_total == 0 &&
-        flood_fill_captured(g, coord, own, visited, stack)) {
+        flood_fill_captured(g, coord, own, visited, queue, &group_size)) {
         BF_CLR(own, coord);
         return MOVE_SUICIDAL;
     }
