@@ -1,4 +1,5 @@
 #include "go.h"
+#include "layout.h"
 
 #include <assert.h>
 #include <string.h>
@@ -83,9 +84,33 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
 
 /* ---- Play a move ---- */
 
-move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color,
-                               uint16_t *stack, uint8_t *visited) {
+/* Remove captured stones marked in `visited`, update tiles to the
+ * appropriate surface tile, and accumulate the capture count/position. */
+static void remove_captured(game_t *g, uint8_t *opp, const uint8_t *visited,
+                            uint16_t *captured_total, uint16_t *captured_at) {
+    uint16_t rp = BOARD_COORD(0, 0);
+    for (uint8_t r = 0; r < g->height; r++) {
+        uint16_t p = rp;
+        for (uint8_t c = 0; c < g->width; c++) {
+            if (BF_GET(visited, p)) {
+                BF_CLR(opp, p);
+                vram_set_tile(c, r, surface_tile(c, r, g->width, g->height));
+                (*captured_total)++;
+                *captured_at = p;
+            }
+            p++;
+        }
+        rp += BOARD_MAX_EXTENT;
+    }
+}
+
+move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
+                               uint8_t color, uint16_t *stack,
+                               uint8_t *visited) {
+    uint16_t coord = BOARD_COORD(col, row);
+
     /* Pass is always legal. */
+    /* Currently unreachable, will refactor later */
     if (coord == COORD_PASS) {
         g->ko = COORD_PASS;
         g->history[g->move_count++] = MOVE_MAKE(COORD_PASS, color);
@@ -101,7 +126,9 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color,
         BF_GET(g->white_stones, coord))
         return MOVE_NON_EMPTY;
 
-    /* Place the stone (needed for correct liberty counting). */
+    /* Place the stone in the bitfield (required for correct liberty
+     * counting).  The VRAM tile write is deferred until the move is
+     * confirmed legal, so suicidal moves never flash on screen. */
     uint8_t *own = (color == BLACK) ? g->black_stones : g->white_stones;
     uint8_t *opp = (color == BLACK) ? g->white_stones : g->black_stones;
     BF_SET(own, coord);
@@ -119,27 +146,23 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color,
         if (!flood_fill_captured(g, nb, opp, visited, stack))
             continue;
 
-        /* Remove every stone in the captured group. */
-        for (uint16_t p = 0; p < BOARD_DATA_LEN; p++) {
-            if (!BF_GET(visited, p))
-                continue;
-            BF_CLR(opp, p);
-            captured_total++;
-            captured_at = p;
-        }
+        remove_captured(g, opp, visited, &captured_total, &captured_at);
     }
 
     /* Ko: exactly one stone captured → record its position. */
     g->ko = (captured_total == 1) ? captured_at : COORD_PASS;
 
     /* Suicide check: if nothing was captured, the placed stone's own
-     * group must have at least one liberty. */
+     * group must have at least one liberty.  Only the bitfield is
+     * undone — no VRAM write was made yet. */
     if (captured_total == 0 &&
         flood_fill_captured(g, coord, own, visited, stack)) {
         BF_CLR(own, coord);
         return MOVE_SUICIDAL;
     }
 
+    /* Move is legal — commit the stone tile to VRAM. */
+    vram_set_tile(col, row, (color == BLACK) ? TILE_STONE_B : TILE_STONE_W);
     g->history[g->move_count++] = MOVE_MAKE(coord, color);
     return MOVE_LEGAL;
 }

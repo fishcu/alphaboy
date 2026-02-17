@@ -110,13 +110,15 @@ typedef struct game {
  * Asserts that width and height are in [BOARD_MIN_SIZE, BOARD_MAX_SIZE]. */
 void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2);
 
-/* Play a move at `coord` for `color`.  COORD_PASS is a valid pass move.
+/* Play a move at (col, row) for `color`.  Updates the board state and
+ * writes changed tiles to VRAM incrementally (via vram_set_tile).
  * `stack` and `visited` are scratch buffers for the flood-fill capture
  * check; they must be large enough (BOARD_POSITIONS entries / one
  * bitfield_t respectively).
  * Returns a move_legality_t indicating whether the move was played. */
-move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color,
-                               uint16_t *stack, uint8_t *visited);
+move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
+                               uint8_t color, uint16_t *stack,
+                               uint8_t *visited);
 
 #ifndef NDEBUG
 /* Print the board state to the emulator debug message window.

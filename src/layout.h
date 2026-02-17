@@ -109,4 +109,15 @@
 #define CURSOR_SPR_LL 2
 #define CURSOR_SPR_LR 3
 
+/* ------------------------------------------------------------------ */
+/*  Display helpers (defined in main.c)                               */
+/* ------------------------------------------------------------------ */
+
+/* Write one BG-map tile without disabling interrupts.
+ * Waits for VRAM-accessible mode then stores a single byte. */
+void vram_set_tile(uint8_t x, uint8_t y, uint8_t tile);
+
+/* Return the board-surface tile index for an empty intersection. */
+uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h);
+
 #endif /* LAYOUT_H */

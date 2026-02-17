@@ -16,7 +16,7 @@ static const uint8_t blank_tile[16] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                                        0xFF, 0xFF, 0xFF, 0xFF};
 
 /* Return the board-surface tile for an empty intersection. */
-static uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
+uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
     uint8_t top = (row == 0);
     uint8_t bottom = (row == h - 1);
     uint8_t left = (col == 0);
@@ -48,7 +48,7 @@ static uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
  * Waits for VRAM-accessible mode (HBlank or VBlank), then stores.
  * A single byte store completes in 1 M-cycle (4 clocks), well
  * within any VRAM-accessible window. */
-static void vram_set_tile(uint8_t x, uint8_t y, uint8_t tile) {
+void vram_set_tile(uint8_t x, uint8_t y, uint8_t tile) {
     volatile uint8_t *addr =
         (volatile uint8_t *)(0x9800u + ((uint16_t)y << 5) + x);
     while (STAT_REG & STATF_BUSY) {
@@ -56,10 +56,9 @@ static void vram_set_tile(uint8_t x, uint8_t y, uint8_t tile) {
     *addr = tile;
 }
 
-/* Write BG tilemap entries from the current board state.
- * Uses vram_set_tile for each cell so interrupts stay enabled
- * and the LYC compression chain is never disrupted. */
-static void board_draw(const game_t *g) {
+/* Full board redraw — used only at init (display off, fast).
+ * During gameplay, game_play_move updates tiles incrementally. */
+static void board_redraw(const game_t *g) {
     uint8_t w = g->width;
     uint8_t h = g->height;
     uint16_t pos = BOARD_COORD(0, 0);
@@ -93,33 +92,30 @@ static void fill_bkg(uint8_t tile) {
 /* ---- HBlank vertical compression ----
  * Each tile is 8x8 in VRAM but we display only 7 rows per tile by
  * bumping SCY once per tile row via LYC-chained STAT interrupts.
- * The ISR waits for HBlank before writing so the change never
- * tears the scanline.  nowait_int_handler is added to the chain
- * to skip the dispatcher's default WAIT_STAT on exit.
  *
- * Compression covers the entire screen uniformly (not just the
- * board area).  The ISR fires isr_line_count times during the
- * visible frame; the (isr_line_count+1)th fire lands in VBlank
- * where it resets SCY and LYC for the next frame.  Board
- * centering is controlled solely by base_scy. */
+ * lcd_isr: Advances LYC for the next fire (safe outside HBlank),
+ *   then waits for HBlank and bumps SCY.  No counter, no reset —
+ *   the chain naturally terminates when LYC exceeds scanline 153.
+ *   nowait_int_handler skips the dispatcher's WAIT_STAT on exit.
+ *
+ * vbl_isr: Resets SCY and LYC at the start of each VBlank so the
+ *   chain restarts on the next visible frame.  VBlank has higher
+ *   interrupt priority than STAT, so it fires at line 144 before
+ *   any stale LYC match could trigger. */
 
 static uint8_t base_scy;
 static uint8_t first_lyc;
-static uint8_t isr_line_count; /* visible fires per frame (set once) */
-static uint8_t isr_counter;    /* fires since last reset              */
 
 static void lcd_isr(void) NONBANKED {
-    while (STAT_REG & STATF_BUSY) {
-    }
-    SCY_REG++;
     LYC_REG += CELL_H;
-    if (isr_counter == isr_line_count) {
-        isr_counter = 0;
-        SCY_REG = base_scy;
-        LYC_REG = first_lyc;
-    } else {
-        isr_counter++;
-    }
+    while (STAT_REG & STATF_BUSY)
+        ;
+    SCY_REG++;
+}
+
+static void vbl_isr(void) NONBANKED {
+    SCY_REG = base_scy;
+    LYC_REG = first_lyc;
 }
 
 void main(void) {
@@ -156,7 +152,7 @@ void main(void) {
 #ifndef NDEBUG
     game_debug_print(g);
 #endif
-    board_draw(g);
+    board_redraw(g);
 
     /* Center the board on screen via BG scroll registers.
      * Board is drawn at BG tile (0,0); the 256x256 BG wraps around,
@@ -169,17 +165,16 @@ void main(void) {
     SCX_REG = (uint8_t)(-(int16_t)offset_x);
     base_scy = (uint8_t)(-(int16_t)offset_y);
     first_lyc = offset_y - 1;
-    isr_line_count = (143 - first_lyc) / CELL_H + 1;
-    isr_counter = 0;
     SCY_REG = base_scy;
 
-    /* Install the LYC-chained ISR via the GBDK dispatcher.
+    /* Install the LYC-chained LCD ISR and the VBlank reset handler.
      * nowait_int_handler skips the dispatcher's WAIT_STAT on exit. */
     LYC_REG = first_lyc;
     CRITICAL {
         STAT_REG |= STATF_LYC;
         add_LCD(lcd_isr);
         add_LCD(nowait_int_handler);
+        add_VBL(vbl_isr);
     }
     set_interrupts(VBL_IFLAG | LCD_IFLAG);
 
@@ -198,12 +193,11 @@ void main(void) {
         /* A button: play a stone at the cursor position. */
         if (game_input->pressed & J_A) {
             uint8_t color = g->move_count & 1;
-            uint16_t coord = BOARD_COORD(game_cursor->col, game_cursor->row);
             move_legality_t result =
-                game_play_move(g, coord, color, flood_stack, flood_visited);
+                game_play_move(g, game_cursor->col, game_cursor->row, color,
+                               flood_stack, flood_visited);
 
             if (result == MOVE_LEGAL) {
-                board_draw(g);
 #ifndef NDEBUG
                 EMU_printf("Move %u: %s at (%hhu,%hhu)",
                            (unsigned)g->move_count,
