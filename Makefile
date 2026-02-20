@@ -90,23 +90,17 @@ else
 endif
 
 # ---- Emulator ----
-# BGB writes debug messages to DEBUGMSG (DebugMsgFile=1 in bgb.ini).
-# We overwrite the file with a timestamp before each run.
 ifeq ($(OS),Windows_NT)
-    BGB      = bgbw64\bgb64.exe
-    DEBUGMSG = bgbw64\debugmsg.txt
+    EMULATOR = Emulicious-with-Java64\Emulicious.exe
 else
-    BGB      = bgbw64/bgb64.exe
-    DEBUGMSG = bgbw64/debugmsg.txt
+    EMULATOR = Emulicious-with-Java64/Emulicious.exe
 endif
 
 run: all
 ifeq ($(OS),Windows_NT)
-	echo --- Run: %DATE% %TIME% --- > $(DEBUGMSG)
-	$(BGB) $(subst /,\,$(BINS))
+	$(EMULATOR) $(subst /,\,$(BINS))
 else
-	date "+--- Run: %Y-%m-%d %H:%M:%S ---" > $(DEBUGMSG)
-	$(BGB) $(BINS)
+	$(EMULATOR) $(BINS)
 endif
 
 # ---- Formatting ----
