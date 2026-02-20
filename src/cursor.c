@@ -101,16 +101,8 @@ void cursor_update(cursor_t *c, const input_t *inp, const game_t *g) {
     c->x = track(c->x, tx);
     c->y = track(c->y, ty);
 
-    /* Sprite spread: 1 while moving or d-pad held, 0 when converged. */
-    uint8_t held = inp->current & (J_LEFT | J_RIGHT | J_UP | J_DOWN);
-    if ((held & J_LEFT && c->col > 0) ||
-        (held & J_RIGHT && c->col < g->width - 1) ||
-        (held & J_UP && c->row > 0) ||
-        (held & J_DOWN && c->row < g->height - 1)) {
-        c->spread = 1;
-    } else {
-        c->spread = (c->x != tx || c->y != ty);
-    }
+    /* Sprite spread: 1 while tracking, 0 when converged. */
+    c->spread = (c->x != tx || c->y != ty);
 }
 
 void cursor_draw(const cursor_t *c) {
