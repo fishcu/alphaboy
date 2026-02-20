@@ -105,6 +105,7 @@ static void fill_bkg(uint8_t tile) {
 
 static uint8_t base_scy;
 static uint8_t first_lyc;
+volatile uint8_t frame_count;
 
 static void lcd_isr(void) NONBANKED {
     LYC_REG += CELL_H;
@@ -116,6 +117,7 @@ static void lcd_isr(void) NONBANKED {
 static void vbl_isr(void) NONBANKED {
     SCY_REG = base_scy;
     LYC_REG = first_lyc;
+    frame_count++;
 }
 
 void main(void) {
@@ -192,12 +194,13 @@ void main(void) {
 
         /* A button: play a stone at the cursor position. */
         if (game_input->pressed & J_A) {
-            uint8_t color = g->move_count & 1;
+            uint8_t color = game_color_to_play(g);
             move_legality_t result =
                 game_play_move(g, game_cursor->col, game_cursor->row, color,
                                flood_stack, flood_visited);
 
             if (result == MOVE_LEGAL) {
+                game_cursor->ghost_tile = 0;
 #ifndef NDEBUG
                 EMU_printf("Move %u: %s at (%hhu,%hhu)",
                            (unsigned)g->move_count,

@@ -183,6 +183,21 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
     return MOVE_LEGAL;
 }
 
+uint8_t game_color_to_play(const game_t *g) {
+    if (g->move_count == 0)
+        return BLACK;
+    return COLOR_OPPOSITE(MOVE_COLOR(g->history[g->move_count - 1]));
+}
+
+uint8_t game_can_play_approx(const game_t *g, uint8_t col, uint8_t row) {
+    uint16_t coord = BOARD_COORD(col, row);
+    if (coord == g->ko)
+        return 0;
+    if (BF_GET(g->black_stones, coord) || BF_GET(g->white_stones, coord))
+        return 0;
+    return 1;
+}
+
 #ifndef NDEBUG
 void game_debug_print(const game_t *g) {
     uint8_t w = g->width;

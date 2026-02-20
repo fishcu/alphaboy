@@ -20,6 +20,16 @@ static uint16_t target_y(uint8_t row, uint8_t board_h) {
     return (uint16_t)(offset + row * CELL_H + 15) << 8;
 }
 
+/* Recompute ghost stone state for the current (col, row). */
+static void recompute_ghost(cursor_t *c, const game_t *g) {
+    c->surface_cache = surface_tile(c->col, c->row, g->width, g->height);
+    if (game_can_play_approx(g, c->col, c->row))
+        c->ghost_tile =
+            (game_color_to_play(g) == BLACK) ? TILE_STONE_B : TILE_STONE_W;
+    else
+        c->ghost_tile = 0;
+}
+
 /* Move `cur` toward `tgt` with exponential tracking.
  * Clamps to CURSOR_MIN_STEP to avoid slow crawl, but never overshoots. */
 static uint16_t track(uint16_t cur, uint16_t tgt) {
@@ -50,6 +60,7 @@ void cursor_init(cursor_t *c, uint8_t col, uint8_t row, const game_t *g) {
     c->spread = 0;
     c->x = target_x(col, g->width);
     c->y = target_y(row, g->height);
+    recompute_ghost(c, g);
 
     /* Assign the cursor tile to all 4 corner sprites. */
     set_sprite_tile(CURSOR_SPR_UL, TILE_CURSOR);
@@ -65,6 +76,8 @@ void cursor_init(cursor_t *c, uint8_t col, uint8_t row, const game_t *g) {
 }
 
 void cursor_update(cursor_t *c, const input_t *inp, const game_t *g) {
+    uint8_t old_col = c->col;
+    uint8_t old_row = c->row;
     uint8_t trigger = inp->pressed | inp->repeated;
 
     if ((trigger & J_LEFT) && c->col > 0)
@@ -76,38 +89,42 @@ void cursor_update(cursor_t *c, const input_t *inp, const game_t *g) {
     if ((trigger & J_DOWN) && c->row < g->height - 1)
         c->row++;
 
+    if (c->col != old_col || c->row != old_row) {
+        if (c->ghost_tile)
+            vram_set_tile(old_col, old_row, c->surface_cache);
+        recompute_ghost(c, g);
+    }
+
     /* Smooth tracking toward target pixel position. */
     uint16_t tx = target_x(c->col, g->width);
     uint16_t ty = target_y(c->row, g->height);
     c->x = track(c->x, tx);
     c->y = track(c->y, ty);
 
-    /* Sprite spread: floor at 2 while d-pad held with room to move,
-     * otherwise decay based on remaining distance to target. */
+    /* Sprite spread: 1 while moving or d-pad held, 0 when converged. */
     uint8_t held = inp->current & (J_LEFT | J_RIGHT | J_UP | J_DOWN);
     if ((held & J_LEFT && c->col > 0) ||
         (held & J_RIGHT && c->col < g->width - 1) ||
         (held & J_UP && c->row > 0) ||
         (held & J_DOWN && c->row < g->height - 1)) {
-        c->spread = 2;
+        c->spread = 1;
     } else {
-        int16_t dx = (int16_t)(tx - c->x);
-        int16_t dy = (int16_t)(ty - c->y);
-        uint16_t adx = dx < 0 ? (uint16_t)(-dx) : (uint16_t)dx;
-        uint16_t ady = dy < 0 ? (uint16_t)(-dy) : (uint16_t)dy;
-        uint16_t dist = adx > ady ? adx : ady;
-        uint8_t s = dist >> CURSOR_SPREAD_SHIFT;
-        c->spread = s > 2 ? 2 : s;
+        c->spread = (c->x != tx || c->y != ty);
     }
 }
 
 void cursor_draw(const cursor_t *c) {
+    if (c->ghost_tile) {
+        uint8_t tile = (frame_count & 1) ? c->ghost_tile : c->surface_cache;
+        vram_set_tile(c->col, c->row, tile);
+    }
+
     uint8_t px = (c->x + 128) >> 8;
     uint8_t py = (c->y + 128) >> 8;
     uint8_t s = c->spread;
 
-    move_sprite(CURSOR_SPR_UL, px - s, py - s);
-    move_sprite(CURSOR_SPR_UR, px + 1 + s, py - s);
-    move_sprite(CURSOR_SPR_LL, px - s, py + 1 + s);
-    move_sprite(CURSOR_SPR_LR, px + 1 + s, py + 1 + s);
+    move_sprite(CURSOR_SPR_UL, px - 1 - s, py - 1 - s);
+    move_sprite(CURSOR_SPR_UR, px + 2 + s, py - 1 - s);
+    move_sprite(CURSOR_SPR_LL, px - 1 - s, py + 2 + s);
+    move_sprite(CURSOR_SPR_LR, px + 2 + s, py + 2 + s);
 }

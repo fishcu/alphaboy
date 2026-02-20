@@ -123,6 +123,14 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
                                uint8_t color, uint16_t *queue,
                                uint8_t *visited);
 
+/* Return the color to play next (BLACK or WHITE).
+ * Derives from the last history entry; handles handicap correctly. */
+uint8_t game_color_to_play(const game_t *g);
+
+/* Cheap legality approximation: 1 if (col, row) is empty and not ko.
+ * Does not check suicide — intended for ghost stone display gating. */
+uint8_t game_can_play_approx(const game_t *g, uint8_t col, uint8_t row);
+
 #ifndef NDEBUG
 /* Print the board state to the emulator debug message window.
  * Output resembles GnuGo's ASCII board: X=black, O=white, .=empty.

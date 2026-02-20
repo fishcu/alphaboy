@@ -7,17 +7,14 @@
 
 #define CURSOR_MIN_STEP 8 /* minimum subpixel movement per frame */
 
-/* Spread: Cursor sprites separate when moving.
- * Shift 6 -> thresholds at 2px (spread 1) and 4px (spread 2) of remaining
- * distance to target.*/
-#define CURSOR_SPREAD_SHIFT 6
-
 typedef struct cursor {
-    uint8_t col;    /* target board column [0, board.width)  */
-    uint8_t row;    /* target board row    [0, board.height) */
-    uint8_t spread; /* current sprite separation (0, 1, 2)   */
-    uint16_t x;     /* current screen X, fixed-point 8.8     */
-    uint16_t y;     /* current screen Y, fixed-point 8.8     */
+    uint8_t col;           /* target board column [0, board.width)  */
+    uint8_t row;           /* target board row    [0, board.height) */
+    uint8_t spread;        /* current sprite separation (0, 1, 2)   */
+    uint16_t x;            /* current screen X, fixed-point 8.8     */
+    uint16_t y;            /* current screen Y, fixed-point 8.8     */
+    uint8_t ghost_tile;    /* stone tile to flicker, 0 = inactive   */
+    uint8_t surface_cache; /* cached surface tile at (col, row)     */
 } cursor_t;
 
 /* Initialize cursor at (col, row), snap position, set up OAM sprites. */

@@ -125,4 +125,7 @@ void vram_set_tile(uint8_t x, uint8_t y, uint8_t tile);
 /* Return the board-surface tile index for an empty intersection. */
 uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h);
 
+/* Frame counter incremented by the VBlank ISR. */
+extern volatile uint8_t frame_count;
+
 #endif /* LAYOUT_H */
