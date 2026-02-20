@@ -117,6 +117,7 @@ static void lcd_isr(void) NONBANKED {
 static void vbl_isr(void) NONBANKED {
     SCY_REG = base_scy;
     LYC_REG = first_lyc;
+    IF_REG &= ~LCD_IFLAG;
     frame_count++;
 }
 
