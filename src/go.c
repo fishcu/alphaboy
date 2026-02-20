@@ -206,7 +206,7 @@ void game_debug_print(const game_t *g) {
     /* Worst case: 19 chars + 18 spaces + null = 38 bytes. */
     char row_str[BOARD_MAX_SIZE * 2];
 
-    EMU_printf("Board %hux%hu", (uint8_t)w, (uint8_t)h);
+    EMU_printf("Board %hux%hu\n", (uint8_t)w, (uint8_t)h);
 
     for (uint8_t row = 0; row < h; row++) {
         uint16_t p = pos;
@@ -223,7 +223,7 @@ void game_debug_print(const game_t *g) {
             p++;
         }
         row_str[idx] = '\0';
-        EMU_printf("%s", row_str);
+        EMU_printf("%s\n", row_str);
         pos += BOARD_MAX_EXTENT;
     }
 }

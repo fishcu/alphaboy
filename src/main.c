@@ -203,7 +203,7 @@ void main(void) {
             if (result == MOVE_LEGAL) {
                 game_cursor->ghost_tile = 0;
 #ifndef NDEBUG
-                EMU_printf("Move %u: %s at (%hhu,%hhu)",
+                EMU_printf("Move %u: %s at (%hu,%hu)\n",
                            (unsigned)g->move_count,
                            (color == BLACK) ? "B" : "W", game_cursor->col,
                            game_cursor->row);
@@ -214,7 +214,7 @@ void main(void) {
             else {
                 static const char *const reasons[] = {"legal", "non-empty",
                                                       "suicidal", "ko"};
-                EMU_printf("Illegal (%s): %s at (%hhu,%hhu)", reasons[result],
+                EMU_printf("Illegal (%s): %s at (%hu,%hu)\n", reasons[result],
                            (color == BLACK) ? "B" : "W", game_cursor->col,
                            game_cursor->row);
             }
