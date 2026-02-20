@@ -1,6 +1,7 @@
 #ifndef LAYOUT_H
 #define LAYOUT_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "cursor.h"
@@ -33,24 +34,28 @@
  */
 
 /* ------------------------------------------------------------------ */
-/*  SRAM object layout (chained via sizeof, auto-adjusts)             */
+/*  SRAM object layout                                                */
 /* ------------------------------------------------------------------ */
 
 #define SRAM_BASE 0xA000u
 
-#define game_state ((game_t *)SRAM_BASE)
+typedef struct sram_layout {
+    game_t game;
+    input_t input;
+    cursor_t cursor;
+    uint16_t flood_queue[BOARD_POSITIONS];
+    uint8_t flood_visited[BOARD_FIELD_BYTES];
+} sram_layout_t;
 
-#define game_input ((input_t *)(SRAM_BASE + sizeof(game_t)))
+_Static_assert(sizeof(sram_layout_t) <= 0x2000u, "SRAM overflow");
 
-#define game_cursor ((cursor_t *)(SRAM_BASE + sizeof(game_t) + sizeof(input_t)))
-
+#define game_state ((game_t *)(SRAM_BASE + offsetof(sram_layout_t, game)))
+#define game_input ((input_t *)(SRAM_BASE + offsetof(sram_layout_t, input)))
+#define game_cursor ((cursor_t *)(SRAM_BASE + offsetof(sram_layout_t, cursor)))
 #define flood_stack                                                            \
-    ((uint16_t *)(SRAM_BASE + sizeof(game_t) + sizeof(input_t) +               \
-                  sizeof(cursor_t)))
-
+    ((uint16_t *)(SRAM_BASE + offsetof(sram_layout_t, flood_queue)))
 #define flood_visited                                                          \
-    ((uint8_t *)(SRAM_BASE + sizeof(game_t) + sizeof(input_t) +                \
-                 sizeof(cursor_t) + BOARD_POSITIONS * sizeof(uint16_t)))
+    ((uint8_t *)(SRAM_BASE + offsetof(sram_layout_t, flood_visited)))
 
 /* ------------------------------------------------------------------ */
 /*  Palette helper                                                    */
