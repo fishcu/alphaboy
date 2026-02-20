@@ -96,11 +96,13 @@ else
     EMULATOR = Emulicious-with-Java64/Emulicious.exe
 endif
 
+EMUFLAGS = -set WindowDebuggerOpen=true -set DebuggerSuspendOnOpen=false
+
 run: all
 ifeq ($(OS),Windows_NT)
-	$(EMULATOR) $(subst /,\,$(BINS))
+	$(EMULATOR) $(EMUFLAGS) $(subst /,\,$(BINS))
 else
-	$(EMULATOR) $(BINS)
+	$(EMULATOR) $(EMUFLAGS) $(BINS)
 endif
 
 # ---- Formatting ----
