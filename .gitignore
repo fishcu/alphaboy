@@ -7,3 +7,4 @@ pandocs/
 obj/
 build/
 *.gb
+.vscode/
