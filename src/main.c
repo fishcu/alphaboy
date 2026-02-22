@@ -8,6 +8,7 @@
 #endif
 
 #include "../res/tiles.h"
+#include "demo.h"
 #include "layout.h"
 
 /* Blank tile: 16 zero bytes = all pixels at color index 0 (black). */
@@ -191,6 +192,10 @@ void main(void) {
 
     while (1) {
         vsync();
+
+#ifdef DEMO_MODE
+        demo_step(g, flood_stack, flood_visited);
+#else
         input_poll(game_input);
 
         /* A button: play a stone at the cursor position. */
@@ -223,5 +228,6 @@ void main(void) {
 
         cursor_update(game_cursor, game_input, g);
         cursor_draw(game_cursor);
+#endif /* DEMO_MODE */
     }
 }
