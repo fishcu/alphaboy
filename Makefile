@@ -21,15 +21,14 @@ PROJECTNAME = alphaboy
 SRCDIR   = src
 RESDIR   = res
 
-# Debug is the default; pass RELEASE=1 for an optimized build.
-ifdef RELEASE
-    VARIANT  = release
-else
-    VARIANT  = debug
-endif
+# ---- Build configuration ----
+# BUILD = debug          (default) debug symbols, verbose, no optimisation
+# BUILD = release        optimised, no debug symbols
+# BUILD = relwithdebinfo optimised + debug symbols (best for profiling)
+BUILD ?= debug
 
-OBJDIR   = obj/$(VARIANT)
-BUILDDIR = build/$(VARIANT)
+OBJDIR   = obj/$(BUILD)
+BUILDDIR = build/$(BUILD)
 
 BINS       = $(BUILDDIR)/$(PROJECTNAME).gb
 
@@ -45,8 +44,10 @@ OBJS += $(ASMSOURCES:%.s=$(OBJDIR)/%.o)
 # MBC5 + RAM + Battery (cart type 0x1B), 1 RAM bank (8 KB)
 LCCFLAGS = -Wm-yt0x1B -Wm-ya1
 
-ifdef RELEASE
-	LCCFLAGS += -DNDEBUG
+ifeq ($(BUILD),release)
+	LCCFLAGS += -DNDEBUG -Wf--opt-code-speed
+else ifeq ($(BUILD),relwithdebinfo)
+	LCCFLAGS += -debug -DNDEBUG -Wf--opt-code-speed
 else
 	LCCFLAGS += -debug -v
 endif
@@ -96,7 +97,8 @@ else
     EMULATOR = Emulicious-with-Java64/Emulicious.exe
 endif
 
-EMUFLAGS = -set WindowDebuggerOpen=true -set DebuggerSuspendOnOpen=false
+EMUFLAGS = -set WindowDebuggerOpen=true -set DebuggerSuspendOnOpen=false \
+           -set WindowProfilerWindowOpen=true -set WindowProfilerWindowProcedureProfiler=true
 
 run: all
 ifeq ($(OS),Windows_NT)
