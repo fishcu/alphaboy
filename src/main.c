@@ -116,10 +116,8 @@ static void fill_bkg(uint8_t tile) {
 #define TIMER_TMA    0x38
 #define TIMER_TAC    (TACF_START | TACF_262KHZ)
 #define TIMER_CALIB  -1
-#define TIMER_PHASE  0  /* 0-15: fine offset in M-cycles (4 dots each) */
 
 static uint8_t base_scy;
-static uint8_t first_lyc;
 volatile uint8_t frame_count;
 
 static uint8_t timer_initial;
@@ -138,18 +136,6 @@ static void vbl_isr(void) NONBANKED {
     TIMA_REG = timer_initial;
     TMA_REG = TIMER_TMA;
     IF_REG &= ~TIM_IFLAG;
-#if (TIMER_PHASE & 8)
-    __asm__("nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop");
-#endif
-#if (TIMER_PHASE & 4)
-    __asm__("nop\nnop\nnop\nnop");
-#endif
-#if (TIMER_PHASE & 2)
-    __asm__("nop\nnop");
-#endif
-#if (TIMER_PHASE & 1)
-    __asm__("nop");
-#endif
     DIV_REG = 0;
     TAC_REG = TIMER_TAC;
     frame_count++;
@@ -198,7 +184,6 @@ void main(void) {
 
     SCX_REG = (uint8_t)(-(int16_t)offset_x);
     base_scy = (uint8_t)(-(int16_t)offset_y - 1);
-    first_lyc = offset_y - 1;
     SCY_REG = base_scy;
 
     /* Precompute timer parameters for 262 KHz with dummy fire.
@@ -207,31 +192,14 @@ void main(void) {
      * dummy_period = total_delay - 796.
      * Each TIMER_CALIB unit = 1 tick = 4 M-cycles. */
     {
+        uint8_t first_line = offset_y - 1;
         uint16_t delay = (uint16_t)7 * 114
-                       + (uint16_t)first_lyc * 114 + 63;
+                       + (uint16_t)first_line * 114 + 63;
         uint16_t dummy_delay = delay - ((uint16_t)(256 - (TIMER_TMA ^ 1)) << 2);
         uint8_t ticks = (uint8_t)((dummy_delay + 3) >> 2) + TIMER_CALIB;
         timer_initial = (uint8_t)(0 - ticks);
     }
 
-    /* ---- Playground: bare vertical-compression test ----
-     * Board is drawn, interrupts drive the SCY trick, nothing else. */
-#if 1
-    CRITICAL {
-        add_VBL(vbl_isr);
-        add_VBL(nowait_int_handler);
-    }
-    set_interrupts(VBL_IFLAG | TIM_IFLAG);
-
-    SHOW_BKG;
-    DISPLAY_ON;
-
-    while (1)
-        vsync();
-#endif
-
-    /* ---- Full game loop (disabled while playground is active) ---- */
-#if 0
     memset(game_input, 0, sizeof(input_t));
 
     CRITICAL {
@@ -286,5 +254,4 @@ void main(void) {
         cursor_draw(game_cursor);
 #endif /* DEMO_MODE */
     }
-#endif /* full game loop */
 }
