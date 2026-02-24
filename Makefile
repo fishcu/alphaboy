@@ -97,14 +97,29 @@ else
 endif
 
 # ---- Emulator ----
-ifeq ($(OS),Windows_NT)
-    EMULATOR = Emulicious-with-Java64\Emulicious.exe
-else
-    EMULATOR = Emulicious-with-Java64/Emulicious.exe
-endif
+# EMU = mesen        (default) Mesen emulator
+# EMU = emulicious   Emulicious with debugger/profiler windows
+# EMU = bgb          BGB emulator
+# Override on the command line: make run EMU=bgb
+# Or set EMULATOR / EMUFLAGS directly for unlisted emulators.
+EMU ?= mesen
 
-EMUFLAGS = -set WindowDebuggerOpen=true -set DebuggerSuspendOnOpen=false \
-           -set WindowProfilerWindowOpen=true -set WindowProfilerWindowProcedureProfiler=true
+ifeq ($(EMU),mesen)
+    EMULATOR ?= Mesen_2.1.1_Windows\Mesen.exe
+    EMUFLAGS ?=
+
+else ifeq ($(EMU),emulicious)
+    EMULATOR ?= Emulicious-with-Java64\Emulicious.exe
+    EMUFLAGS ?= -set WindowDebuggerOpen=true -set DebuggerSuspendOnOpen=false \
+                -set WindowProfilerWindowOpen=true -set WindowProfilerWindowProcedureProfiler=true
+
+else ifeq ($(EMU),bgb)
+    EMULATOR ?= bgbw64\bgb.exe
+    EMUFLAGS ?=
+
+else
+    $(error Unknown EMU value '$(EMU)'. Use mesen, emulicious, or bgb (or set EMULATOR directly))
+endif
 
 run: all
 ifeq ($(OS),Windows_NT)
