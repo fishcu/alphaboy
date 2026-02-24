@@ -1,5 +1,6 @@
 #include <gb/gb.h>
 #include <gb/hardware.h>
+#include <gb/isr.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -10,6 +11,9 @@
 #include "../res/tiles.h"
 #include "demo.h"
 #include "layout.h"
+
+/* Timer-based vertical compression (ISR_VECTOR for Timer).
+ * Requires NDEBUG (relwithdebinfo/release) to avoid lcd.o linker conflict. */
 
 /* Blank tile: 16 zero bytes = all pixels at color index 0 (black). */
 static const uint8_t blank_tile[16] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -90,35 +94,64 @@ static void fill_bkg(uint8_t tile) {
         set_bkg_tiles(0, y, 32, 1, row);
 }
 
-/* ---- HBlank vertical compression ----
- * Each tile is 8x8 in VRAM but we display only 7 rows per tile by
- * bumping SCY once per tile row via LYC-chained STAT interrupts.
+/* ---- HBlank vertical compression (timer-based) ----
  *
- * lcd_isr: Advances LYC for the next fire (safe outside HBlank),
- *   then waits for HBlank and bumps SCY.  No counter, no reset —
- *   the chain naturally terminates when LYC exceeds scanline 153.
- *   nowait_int_handler skips the dispatcher's WAIT_STAT on exit.
+ * Each tile is 8x8 in VRAM but we display only 7 pixel rows per tile
+ * by bumping SCY once per tile row.  A hardware timer fires every
+ * ~800 M-cycles (~7 scanlines).  With the right initial sync all fires
+ * land in or near HBlank; a short STAT safety-wait covers imprecision.
  *
- * vbl_isr: Resets SCY and LYC at the start of each VBlank so the
- *   chain restarts on the next visible frame.  VBlank has higher
- *   interrupt priority than STAT, so it fires at line 144 before
- *   any stale LYC match could trigger. */
+ * 262 KHz timer with alternating TMA: TMA toggles between 0x38
+ * (period 800, drift +2) and 0x39 (period 796, drift -2) each fire.
+ * Average period = 798 = ideal.  Max drift = 2 M-cycles.
+ *
+ * The initial delay from VBlank to the first tile row exceeds the max
+ * single 262 KHz period (1024 M-cycles), so the first overflow is a
+ * "dummy" fire that lands during VBlank.  base_scy is offset by -1
+ * so the dummy's SCY++ is absorbed before rendering begins.
+ *
+ * TIMER_CALIB: signed tick offset applied to the computed initial TIMA.
+ *   Each unit = 1 tick = 4 M-cycles at 262 KHz. */
+
+#define TIMER_TMA    0x38
+#define TIMER_TAC    (TACF_START | TACF_262KHZ)
+#define TIMER_CALIB  -1
+#define TIMER_PHASE  0  /* 0-15: fine offset in M-cycles (4 dots each) */
 
 static uint8_t base_scy;
 static uint8_t first_lyc;
 volatile uint8_t frame_count;
 
-static void lcd_isr(void) NONBANKED {
-    LYC_REG += CELL_H;
+static uint8_t timer_initial;
+
+static void timer_isr(void) CRITICAL INTERRUPT {
+    TMA_REG ^= 1;
     while (STAT_REG & STATF_BUSY)
         ;
     SCY_REG++;
 }
+ISR_VECTOR(VECTOR_TIMER, timer_isr)
 
 static void vbl_isr(void) NONBANKED {
     SCY_REG = base_scy;
-    LYC_REG = first_lyc;
-    IF_REG &= ~LCD_IFLAG;
+    TAC_REG = TACF_STOP;
+    TIMA_REG = timer_initial;
+    TMA_REG = TIMER_TMA;
+    IF_REG &= ~TIM_IFLAG;
+#if (TIMER_PHASE & 8)
+    __asm__("nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop");
+#endif
+#if (TIMER_PHASE & 4)
+    __asm__("nop\nnop\nnop\nnop");
+#endif
+#if (TIMER_PHASE & 2)
+    __asm__("nop\nnop");
+#endif
+#if (TIMER_PHASE & 1)
+    __asm__("nop");
+#endif
+    DIV_REG = 0;
+    TAC_REG = TIMER_TAC;
     frame_count++;
 }
 
@@ -145,9 +178,8 @@ void main(void) {
     /* Fill entire visible background with the blank tile. */
     fill_bkg(TILE_BLANK);
 
-    /* Enable SRAM and zero-init input state. */
+    /* Enable SRAM. */
     ENABLE_RAM;
-    memset(game_input, 0, sizeof(input_t));
 
     /* Initialize and draw the board. */
     game_t *g = game_state;
@@ -160,29 +192,54 @@ void main(void) {
 
     /* Center the board on screen via BG scroll registers.
      * Board is drawn at BG tile (0,0); the 256x256 BG wraps around,
-     * so the negative offset shows blank (black) tiles as margin.
-     * The first LYC fires 1 scanline before the board to skip each
-     * tile's duplicate row 0 before it ever appears on screen. */
+     * so the negative offset shows blank (black) tiles as margin. */
     uint8_t offset_x = (SCREEN_W * 8 - g->width * CELL_W) / 2;
     uint8_t offset_y = (SCREEN_H * 8 - g->height * CELL_H) / 2;
 
     SCX_REG = (uint8_t)(-(int16_t)offset_x);
-    base_scy = (uint8_t)(-(int16_t)offset_y);
+    base_scy = (uint8_t)(-(int16_t)offset_y - 1);
     first_lyc = offset_y - 1;
     SCY_REG = base_scy;
 
-    /* Install the LYC-chained LCD ISR and the VBlank reset handler.
-     * nowait_int_handler skips the dispatcher's WAIT_STAT on exit. */
-    LYC_REG = first_lyc;
-    CRITICAL {
-        STAT_REG |= STATF_LYC;
-        add_LCD(lcd_isr);
-        add_LCD(nowait_int_handler);
-        add_VBL(vbl_isr);
+    /* Precompute timer parameters for 262 KHz with dummy fire.
+     * Total delay from VBL to first real fire = dummy_period + first_period.
+     * first_period = (256 - 0x39) * 4 = 796 (TMA flips to 0x39 after dummy).
+     * dummy_period = total_delay - 796.
+     * Each TIMER_CALIB unit = 1 tick = 4 M-cycles. */
+    {
+        uint16_t delay = (uint16_t)7 * 114
+                       + (uint16_t)first_lyc * 114 + 63;
+        uint16_t dummy_delay = delay - ((uint16_t)(256 - (TIMER_TMA ^ 1)) << 2);
+        uint8_t ticks = (uint8_t)((dummy_delay + 3) >> 2) + TIMER_CALIB;
+        timer_initial = (uint8_t)(0 - ticks);
     }
-    set_interrupts(VBL_IFLAG | LCD_IFLAG);
 
-    /* Initialize the cursor at the center of the board. */
+    /* ---- Playground: bare vertical-compression test ----
+     * Board is drawn, interrupts drive the SCY trick, nothing else. */
+#if 1
+    CRITICAL {
+        add_VBL(vbl_isr);
+        add_VBL(nowait_int_handler);
+    }
+    set_interrupts(VBL_IFLAG | TIM_IFLAG);
+
+    SHOW_BKG;
+    DISPLAY_ON;
+
+    while (1)
+        vsync();
+#endif
+
+    /* ---- Full game loop (disabled while playground is active) ---- */
+#if 0
+    memset(game_input, 0, sizeof(input_t));
+
+    CRITICAL {
+        add_VBL(vbl_isr);
+        add_VBL(nowait_int_handler);
+    }
+    set_interrupts(VBL_IFLAG | TIM_IFLAG);
+
     cursor_init(game_cursor, g->width / 2, g->height / 2, g);
     cursor_draw(game_cursor);
 
@@ -198,7 +255,6 @@ void main(void) {
 #else
         input_poll(game_input);
 
-        /* A button: play a stone at the cursor position. */
         if (game_input->pressed & J_A) {
             uint8_t color = game_color_to_play(g);
             move_legality_t result =
@@ -230,4 +286,5 @@ void main(void) {
         cursor_draw(game_cursor);
 #endif /* DEMO_MODE */
     }
+#endif /* full game loop */
 }
