@@ -105,6 +105,13 @@ static void fill_bkg(uint8_t tile) {
  * (period 800, drift +2) and 0x39 (period 796, drift -2) each fire.
  * Average period = 798 = ideal.  Max drift = 2 M-cycles.
  *
+ * TAC and TMA are configured once at init and never rewritten, avoiding
+ * the spurious TIMA increments that the falling-edge detector can cause.
+ * VBlank re-syncs the timer by writing TIMA and resetting DIV only.
+ *
+ * The ISR is hand-written __naked assembly, saving only af (the sole
+ * register pair it uses) instead of SDCC's default four-pair save.
+ *
  * The initial delay from VBlank to the first tile row exceeds the max
  * single 262 KHz period (1024 M-cycles), so the first overflow is a
  * "dummy" fire that lands during VBlank.  base_scy is offset by -1
@@ -115,29 +122,39 @@ static void fill_bkg(uint8_t tile) {
 
 #define TIMER_TMA    0x38
 #define TIMER_TAC    (TACF_START | TACF_262KHZ)
-#define TIMER_CALIB  -1
+#define TIMER_CALIB  9
 
 static uint8_t base_scy;
 volatile uint8_t frame_count;
 
 static uint8_t timer_initial;
 
-static void timer_isr(void) CRITICAL INTERRUPT {
-    TMA_REG ^= 1;
-    while (STAT_REG & STATF_BUSY)
-        ;
-    SCY_REG++;
+// clang-format off
+void timer_isr(void) __naked {
+    __asm
+    push    af
+    ldh     a, (0x06)       ; TMA_REG
+    xor     a, #0x01
+    ldh     (0x06), a
+00200$:
+    ldh     a, (0x41)       ; STAT_REG
+    bit     1, a
+    jr      NZ, 00200$
+    ldh     a, (0x42)       ; SCY_REG
+    inc     a
+    ldh     (0x42), a
+    pop     af
+    reti
+    __endasm;
 }
 ISR_VECTOR(VECTOR_TIMER, timer_isr)
+// clang-format on
 
 static void vbl_isr(void) NONBANKED {
     SCY_REG = base_scy;
-    TAC_REG = TACF_STOP;
     TIMA_REG = timer_initial;
-    TMA_REG = TIMER_TMA;
-    IF_REG &= ~TIM_IFLAG;
     DIV_REG = 0;
-    TAC_REG = TIMER_TAC;
+    IF_REG &= ~TIM_IFLAG;
     frame_count++;
 }
 
@@ -201,6 +218,9 @@ void main(void) {
     }
 
     memset(game_input, 0, sizeof(input_t));
+
+    TMA_REG = TIMER_TMA;
+    TAC_REG = TIMER_TAC;
 
     CRITICAL {
         add_VBL(vbl_isr);
