@@ -29,7 +29,7 @@ static const uint8_t tile_data[16] = {
 #define TIMER_TAC (TACF_START | TACF_262KHZ)
 
 static uint8_t base_scy = 250;
-static uint8_t timer_initial = 126;
+static uint8_t timer_initial = 119;
 
 static void timer_isr(void) CRITICAL INTERRUPT {
     TMA_REG ^= 1;
@@ -41,12 +41,9 @@ ISR_VECTOR(VECTOR_TIMER, timer_isr)
 
 static void vbl_isr(void) NONBANKED {
     SCY_REG = base_scy;
-    TAC_REG = TACF_STOP;
     TIMA_REG = timer_initial;
-    TMA_REG = TIMER_TMA;
-    IF_REG &= ~TIM_IFLAG;
     DIV_REG = 0;
-    TAC_REG = TIMER_TAC;
+    IF_REG &= ~TIM_IFLAG;
 }
 
 void main(void) {
@@ -62,6 +59,8 @@ void main(void) {
         set_bkg_tiles(0, y, 32, 1, row);
 
     SCY_REG = base_scy;
+    TMA_REG = TIMER_TMA;
+    TAC_REG = TIMER_TAC;
 
     CRITICAL {
         add_VBL(vbl_isr);
