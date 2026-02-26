@@ -122,7 +122,7 @@ static void fill_bkg(uint8_t tile) {
 
 #define TIMER_TMA    0x38
 #define TIMER_TAC    (TACF_START | TACF_262KHZ)
-#define TIMER_CALIB  9
+#define TIMER_CALIB  10
 
 static uint8_t base_scy;
 volatile uint8_t frame_count;
@@ -153,6 +153,7 @@ ISR_VECTOR(VECTOR_TIMER, timer_isr)
 static void vbl_isr(void) NONBANKED {
     SCY_REG = base_scy;
     TIMA_REG = timer_initial;
+    TMA_REG = TIMER_TMA;
     DIV_REG = 0;
     IF_REG &= ~TIM_IFLAG;
     frame_count++;
@@ -250,7 +251,7 @@ void main(void) {
                                flood_stack, flood_visited);
 
             if (result == MOVE_LEGAL) {
-                game_cursor->ghost_tile = 0;
+                cursor_invalidate(game_cursor);
 #ifndef NDEBUG
                 EMU_printf("Move %u: %s at (%hu,%hu)\n",
                            (unsigned)g->move_count,
@@ -268,6 +269,16 @@ void main(void) {
                            game_cursor->row);
             }
 #endif
+        }
+
+        if (game_input->pressed & J_B) {
+            if (game_undo(g, flood_stack) == UNDO_OK) {
+                cursor_invalidate(game_cursor);
+#ifndef NDEBUG
+                EMU_printf("Undo → move_count=%u\n", (unsigned)g->move_count);
+                game_debug_print(g);
+#endif
+            }
         }
 
         cursor_update(game_cursor, game_input, g);

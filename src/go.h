@@ -35,22 +35,35 @@ typedef uint8_t move_legality_t;
 #define MOVE_SUICIDAL 2
 #define MOVE_KO 3
 
+/* --- Undo result --- */
+
+typedef uint8_t undo_result_t;
+
+#define UNDO_OK         0
+#define UNDO_NO_HISTORY 1
+
 /* --- Coordinates and moves --- */
 
 /* Board positions are uint16_t indices into the padded grid.
- * COORD_PASS is a sentinel that can never be a valid position. */
-#define COORD_PASS 0x7FFFu
+ * COORD_PASS is a sentinel that can never be a valid position.
+ * 10-bit coordinate range (0-1023) supports boards up to 30x30. */
+#define COORD_PASS 0x03FFu
 
-/* Packed move: bits 0-14 = board coordinate, bit 15 = color.
- * Two bytes per move; used for the move history. */
+/* Packed move (16 bits):
+ *   bit  15       color (BLACK=0, WHITE=1)
+ *   bit  14       ko flag (this move caused ko)
+ *   bits 13-10    capture direction flags (UP, DOWN, LEFT, RIGHT)
+ *   bits 9-0      board coordinate or COORD_PASS */
 typedef uint16_t move_t;
 
 #define MOVE_COLOR_BIT 15
-#define MOVE_COORD_MASK 0x7FFFu
+#define MOVE_KO_BIT    14
+#define MOVE_CAP_SHIFT 10
+#define MOVE_COORD_MASK 0x03FFu
 
 #define MOVE_MAKE(coord, color)                                                \
     ((move_t)((coord) | ((move_t)(color) << MOVE_COLOR_BIT)))
-#define MOVE_COORD(m) ((m)&MOVE_COORD_MASK)
+#define MOVE_COORD(m) ((m) & MOVE_COORD_MASK)
 #define MOVE_COLOR(m) ((m) >> MOVE_COLOR_BIT)
 
 /* Maximum number of moves stored in history. */
@@ -95,10 +108,11 @@ typedef struct game {
     int8_t komi2;                /* 2 * komi (bonus for white at game end) */
     uint16_t ko;                 /* active ko position, COORD_PASS if none */
     uint16_t move_count;         /* number of moves played so far          */
+    uint16_t history_base;       /* oldest undoable move_count value       */
     bitfield_t on_board;         /* 1 = coordinate lies inside the board   */
     bitfield_t black_stones;     /* 1 = black stone present                */
     bitfield_t white_stones;     /* 1 = white stone present                */
-    move_t history[HISTORY_MAX]; /* packed move log for undo/replay    */
+    move_t history[HISTORY_MAX]; /* ring buffer of packed moves            */
 } game_t;
 
 /* --- Neighbor offsets in the padded grid --- */
@@ -113,6 +127,9 @@ typedef struct game {
  * Asserts that width and height are in [BOARD_MIN_SIZE, BOARD_MAX_SIZE]. */
 void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2);
 
+/* Play a pass for `color`.  Clears ko and records the pass in history. */
+void game_play_pass(game_t *g, uint8_t color);
+
 /* Play a move at (col, row) for `color`.  Updates the board state and
  * writes changed tiles to VRAM incrementally (via vram_set_tile).
  * `queue` and `visited` are scratch buffers for the flood-fill capture
@@ -122,6 +139,11 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2);
 move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
                                uint8_t color, uint16_t *queue,
                                uint8_t *visited);
+
+/* Undo the last move, restoring captured stones and ko state.
+ * `queue` is a scratch buffer (BOARD_POSITIONS entries).
+ * Returns UNDO_OK on success, UNDO_NO_HISTORY if nothing to undo. */
+undo_result_t game_undo(game_t *g, uint16_t *queue);
 
 /* Return the color to play next (BLACK or WHITE).
  * Derives from the last history entry; handles handicap correctly. */

@@ -71,6 +71,7 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
     g->komi2 = komi2;
     g->ko = COORD_PASS;
     g->move_count = 0;
+    g->history_base = 0;
 
     memset(g->on_board, 0, BOARD_FIELD_BYTES);
     memset(g->black_stones, 0, BOARD_FIELD_BYTES);
@@ -92,6 +93,13 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
 }
 
 /* ---- Play a move ---- */
+
+void game_play_pass(game_t *g, uint8_t color) {
+    g->ko = COORD_PASS;
+    if (g->move_count >= g->history_base + HISTORY_MAX)
+        g->history_base++;
+    g->history[g->move_count++ % HISTORY_MAX] = MOVE_MAKE(COORD_PASS, color);
+}
 
 /* Remove captured stones listed in `queue[0..group_size-1]`.
  * Clears each stone from `opp`, writes the appropriate surface tile
@@ -115,14 +123,6 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
                                uint8_t *visited) {
     uint16_t coord = BOARD_COORD(col, row);
 
-    /* Pass is always legal. */
-    /* Currently unreachable, will refactor later */
-    if (coord == COORD_PASS) {
-        g->ko = COORD_PASS;
-        g->history[g->move_count++] = MOVE_MAKE(COORD_PASS, color);
-        return MOVE_LEGAL;
-    }
-
     /* Ko check. */
     if (coord == g->ko)
         return MOVE_KO;
@@ -143,6 +143,7 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
     memset(visited, 0, BOARD_FIELD_BYTES);
 
     /* Check each adjacent opponent group for captures. */
+    move_t move = MOVE_MAKE(coord, color);
     uint16_t captured_total = 0;
     uint16_t captured_at = COORD_PASS;
     uint16_t group_size;
@@ -162,10 +163,16 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
 
         remove_captured(g, opp, queue, group_size, &captured_total,
                         &captured_at);
+        move |= (1u << (MOVE_CAP_SHIFT + d));
     }
 
-    /* Ko: exactly one stone captured → record its position. */
-    g->ko = (captured_total == 1) ? captured_at : COORD_PASS;
+    /* Ko: exactly one stone captured → record its position and flag. */
+    if (captured_total == 1) {
+        g->ko = captured_at;
+        move |= (1u << MOVE_KO_BIT);
+    } else {
+        g->ko = COORD_PASS;
+    }
 
     /* Suicide check: if nothing was captured, the placed stone's own
      * group must have at least one liberty.  Visited is not cleared —
@@ -179,14 +186,94 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
 
     /* Move is legal — commit the stone tile to VRAM. */
     vram_set_tile(col, row, (color == BLACK) ? TILE_STONE_B : TILE_STONE_W);
-    g->history[g->move_count++] = MOVE_MAKE(coord, color);
+    if (g->move_count >= g->history_base + HISTORY_MAX)
+        g->history_base++;
+    g->history[g->move_count++ % HISTORY_MAX] = move;
     return MOVE_LEGAL;
+}
+
+undo_result_t game_undo(game_t *g, uint16_t *queue) {
+    if (g->move_count <= g->history_base)
+        return UNDO_NO_HISTORY;
+    if (g->history_base > 0 && g->move_count <= g->history_base + 1)
+        return UNDO_NO_HISTORY;
+
+    g->move_count--;
+    move_t move = g->history[g->move_count % HISTORY_MAX];
+    uint16_t coord = MOVE_COORD(move);
+
+    if (coord != COORD_PASS) {
+        uint8_t color = MOVE_COLOR(move);
+        uint8_t *own = (color == BLACK) ? g->black_stones : g->white_stones;
+        uint8_t *opp = (color == BLACK) ? g->white_stones : g->black_stones;
+        uint8_t opp_tile = (color == BLACK) ? TILE_STONE_W : TILE_STONE_B;
+
+        /* Restore captured groups by flood-filling through empties.
+         * Each captured group's empty region is fully enclosed by the
+         * capturing player's stones and the board edge, so a BFS from
+         * the capture-direction neighbor recovers exactly the group. */
+        for (uint8_t d = 0; d < 4; d++) {
+            if (!(move & (1u << (MOVE_CAP_SHIFT + d))))
+                continue;
+
+            uint16_t nb = coord + dirs[d];
+            uint16_t head = 0;
+            uint16_t tail = 0;
+
+            queue[tail++] = nb;
+            BF_SET(opp, nb);
+
+            while (head < tail) {
+                uint16_t pos = queue[head++];
+                uint8_t r = pos / BOARD_MAX_EXTENT - BOARD_MARGIN;
+                uint8_t c = pos % BOARD_MAX_EXTENT - BOARD_MARGIN;
+                vram_set_tile(c, r, opp_tile);
+                for (uint8_t dd = 0; dd < 4; dd++) {
+                    uint16_t adj = pos + dirs[dd];
+                    if (!BF_GET(g->on_board, adj))
+                        continue;
+                    if (BF_GET(g->black_stones, adj) ||
+                        BF_GET(g->white_stones, adj))
+                        continue;
+                    BF_SET(opp, adj);
+                    queue[tail++] = adj;
+                }
+            }
+        }
+
+        /* Remove the played stone. */
+        BF_CLR(own, coord);
+        uint8_t row = coord / BOARD_MAX_EXTENT - BOARD_MARGIN;
+        uint8_t col = coord % BOARD_MAX_EXTENT - BOARD_MARGIN;
+        vram_set_tile(col, row, surface_tile(col, row, g->width, g->height));
+    }
+
+    /* Restore ko state.  The early-out above guarantees that when
+     * move_count > 0 the previous history entry is still valid. */
+    if (g->move_count == 0) {
+        g->ko = COORD_PASS;
+    } else {
+        move_t prev = g->history[(g->move_count - 1) % HISTORY_MAX];
+        if (prev & (1u << MOVE_KO_BIT)) {
+            uint16_t prev_coord = MOVE_COORD(prev);
+            for (uint8_t d = 0; d < 4; d++) {
+                if (prev & (1u << (MOVE_CAP_SHIFT + d))) {
+                    g->ko = prev_coord + dirs[d];
+                    break;
+                }
+            }
+        } else {
+            g->ko = COORD_PASS;
+        }
+    }
+
+    return UNDO_OK;
 }
 
 uint8_t game_color_to_play(const game_t *g) {
     if (g->move_count == 0)
         return BLACK;
-    return COLOR_OPPOSITE(MOVE_COLOR(g->history[g->move_count - 1]));
+    return COLOR_OPPOSITE(MOVE_COLOR(g->history[(g->move_count - 1) % HISTORY_MAX]));
 }
 
 uint8_t game_can_play_approx(const game_t *g, uint8_t col, uint8_t row) {

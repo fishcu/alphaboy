@@ -58,6 +58,7 @@ void cursor_init(cursor_t *c, uint8_t col, uint8_t row, const game_t *g) {
     c->col = col;
     c->row = row;
     c->spread = 0;
+    c->dirty = 0;
     c->x = target_x(col, g->width);
     c->y = target_y(row, g->height);
     recompute_ghost(c, g);
@@ -75,6 +76,8 @@ void cursor_init(cursor_t *c, uint8_t col, uint8_t row, const game_t *g) {
     set_sprite_prop(CURSOR_SPR_LR, S_FLIPX | S_FLIPY);
 }
 
+void cursor_invalidate(cursor_t *c) { c->dirty = 1; }
+
 void cursor_update(cursor_t *c, const input_t *inp, const game_t *g) {
     uint8_t old_col = c->col;
     uint8_t old_row = c->row;
@@ -89,10 +92,12 @@ void cursor_update(cursor_t *c, const input_t *inp, const game_t *g) {
     if ((trigger & J_DOWN) && c->row < g->height - 1)
         c->row++;
 
-    if (c->col != old_col || c->row != old_row) {
-        if (c->ghost_tile)
+    uint8_t moved = (c->col != old_col || c->row != old_row);
+    if (moved || c->dirty) {
+        if (c->ghost_tile && moved)
             vram_set_tile(old_col, old_row, c->surface_cache);
         recompute_ghost(c, g);
+        c->dirty = 0;
     }
 
     /* Smooth tracking toward target pixel position. */
