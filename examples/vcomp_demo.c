@@ -29,15 +29,28 @@ static const uint8_t tile_data[16] = {
 #define TIMER_TAC (TACF_START | TACF_262KHZ)
 
 static uint8_t base_scy = 250;
-static uint8_t timer_initial = 119;
+static uint8_t timer_initial = 116;
 
-static void timer_isr(void) CRITICAL INTERRUPT {
-    TMA_REG ^= 1;
-    while (STAT_REG & STATF_BUSY)
-        ;
-    SCY_REG++;
+// clang-format off
+void timer_isr(void) __naked {
+    __asm
+    push    af
+    ldh     a, (0x06)       ; TMA_REG
+    xor     a, #0x01
+    ldh     (0x06), a
+00200$:
+    ldh     a, (0x41)       ; STAT_REG
+    bit     1, a
+    jr      NZ, 00200$
+    ldh     a, (0x42)       ; SCY_REG
+    inc     a
+    ldh     (0x42), a
+    pop     af
+    reti
+    __endasm;
 }
 ISR_VECTOR(VECTOR_TIMER, timer_isr)
+// clang-format on
 
 static void vbl_isr(void) NONBANKED {
     SCY_REG = base_scy;
