@@ -120,9 +120,9 @@ static void fill_bkg(uint8_t tile) {
  * TIMER_CALIB: signed tick offset applied to the computed initial TIMA.
  *   Each unit = 1 tick = 4 M-cycles at 262 KHz. */
 
-#define TIMER_TMA    0x38
-#define TIMER_TAC    (TACF_START | TACF_262KHZ)
-#define TIMER_CALIB  10
+#define TIMER_TMA 0x38
+#define TIMER_TAC (TACF_START | TACF_262KHZ)
+#define TIMER_CALIB 10
 
 static uint8_t base_scy;
 volatile uint8_t frame_count;
@@ -211,8 +211,7 @@ void main(void) {
      * Each TIMER_CALIB unit = 1 tick = 4 M-cycles. */
     {
         uint8_t first_line = offset_y - 1;
-        uint16_t delay = (uint16_t)7 * 114
-                       + (uint16_t)first_line * 114 + 63;
+        uint16_t delay = (uint16_t)7 * 114 + (uint16_t)first_line * 114 + 63;
         uint16_t dummy_delay = delay - ((uint16_t)(256 - (TIMER_TMA ^ 1)) << 2);
         uint8_t ticks = (uint8_t)((dummy_delay + 3) >> 2) + TIMER_CALIB;
         timer_initial = (uint8_t)(0 - ticks);

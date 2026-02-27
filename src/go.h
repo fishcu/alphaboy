@@ -39,7 +39,7 @@ typedef uint8_t move_legality_t;
 
 typedef uint8_t undo_result_t;
 
-#define UNDO_OK         0
+#define UNDO_OK 0
 #define UNDO_NO_HISTORY 1
 
 /* --- Coordinates and moves --- */
@@ -57,13 +57,13 @@ typedef uint8_t undo_result_t;
 typedef uint16_t move_t;
 
 #define MOVE_COLOR_BIT 15
-#define MOVE_KO_BIT    14
+#define MOVE_KO_BIT 14
 #define MOVE_CAP_SHIFT 10
 #define MOVE_COORD_MASK 0x03FFu
 
 #define MOVE_MAKE(coord, color)                                                \
     ((move_t)((coord) | ((move_t)(color) << MOVE_COLOR_BIT)))
-#define MOVE_COORD(m) ((m) & MOVE_COORD_MASK)
+#define MOVE_COORD(m) ((m)&MOVE_COORD_MASK)
 #define MOVE_COLOR(m) ((m) >> MOVE_COLOR_BIT)
 
 /* Maximum number of moves stored in history. */
