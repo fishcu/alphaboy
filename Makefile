@@ -114,7 +114,7 @@ else ifeq ($(EMU),emulicious)
                 -set WindowProfilerWindowOpen=true -set WindowProfilerWindowProcedureProfiler=true
 
 else ifeq ($(EMU),bgb)
-    EMULATOR ?= bgbw64\bgb.exe
+    EMULATOR ?= bgbw64\bgb64.exe
     EMUFLAGS ?=
 
 else
