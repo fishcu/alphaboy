@@ -15,11 +15,6 @@
 /* Timer-based vertical compression (ISR_VECTOR for Timer).
  * Requires NDEBUG (relwithdebinfo/release) to avoid lcd.o linker conflict. */
 
-/* Blank tile: 16 zero bytes = all pixels at color index 0 (black). */
-static const uint8_t blank_tile[16] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                                       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                                       0xFF, 0xFF, 0xFF, 0xFF};
-
 /* Return the board-surface tile for an empty intersection. */
 uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
     uint8_t top = (row == 0);
@@ -62,12 +57,41 @@ void vram_set_tile(uint8_t x, uint8_t y, uint8_t tile) {
 }
 
 /* Full board redraw — used only at init (display off, fast).
+ * Draws the decorative frame and all intersections.
  * During gameplay, game_play_move updates tiles incrementally. */
 static void board_redraw(const game_t *g) {
     uint8_t w = g->width;
     uint8_t h = g->height;
-    uint16_t pos = BOARD_COORD(0, 0);
 
+    /* ---- Frame ---- */
+
+    /* Top row. */
+    vram_set_tile(0, 0, TILE_FRAME_TL);
+    for (uint8_t col = 0; col < w; col++)
+        vram_set_tile(col + BOARD_BG_X, 0, TILE_FRAME_T);
+    vram_set_tile(w + BOARD_BG_X, 0, TILE_FRAME_TR);
+
+    /* Left and right columns. */
+    for (uint8_t row = 0; row < h; row++) {
+        vram_set_tile(0, row + BOARD_BG_Y, TILE_FRAME_L);
+        vram_set_tile(w + BOARD_BG_X, row + BOARD_BG_Y, TILE_FRAME_R);
+    }
+
+    /* Bottom rows (two tiles tall). */
+    uint8_t by1 = h + BOARD_BG_Y;
+    uint8_t by2 = by1 + 1;
+    vram_set_tile(0, by1, TILE_FRAME_BL_U);
+    vram_set_tile(0, by2, TILE_FRAME_BL_D);
+    for (uint8_t col = 0; col < w; col++) {
+        vram_set_tile(col + BOARD_BG_X, by1, TILE_FRAME_B_U);
+        vram_set_tile(col + BOARD_BG_X, by2, TILE_FRAME_B_D);
+    }
+    vram_set_tile(w + BOARD_BG_X, by1, TILE_FRAME_BR_U);
+    vram_set_tile(w + BOARD_BG_X, by2, TILE_FRAME_BR_D);
+
+    /* ---- Board intersections ---- */
+
+    uint16_t pos = BOARD_COORD(0, 0);
     for (uint8_t row = 0; row < h; row++) {
         uint16_t p = pos;
         for (uint8_t col = 0; col < w; col++) {
@@ -78,7 +102,7 @@ static void board_redraw(const game_t *g) {
                 tile = TILE_STONE_W;
             else
                 tile = surface_tile(col, row, w, h);
-            vram_set_tile(col, row, tile);
+            vram_set_tile(col + BOARD_BG_X, row + BOARD_BG_Y, tile);
             p++;
         }
         pos += BOARD_MAX_EXTENT;
@@ -176,11 +200,10 @@ void main(void) {
     OBP0_REG = DMG_PAL(0, 0, 3, 2);
 
     /* Load tiles to 0x8000 (shared BG + Sprite region). */
-    set_tile_data(0, 1, blank_tile, TILE_DATA_BASE);
-    set_tile_data(TILE_OFFSET, tiles_TILE_COUNT, tiles_tiles, TILE_DATA_BASE);
+    set_tile_data(0, tiles_TILE_COUNT, tiles_tiles, TILE_DATA_BASE);
 
-    /* Fill entire visible background with the blank tile. */
-    fill_bkg(TILE_BLANK);
+    /* Fill entire visible background with the empty tile. */
+    fill_bkg(TILE_EMPTY);
 
     /* Enable SRAM. */
     ENABLE_RAM;
@@ -195,13 +218,14 @@ void main(void) {
     board_redraw(g);
 
     /* Center the board on screen via BG scroll registers.
-     * Board is drawn at BG tile (0,0); the 256x256 BG wraps around,
-     * so the negative offset shows blank (black) tiles as margin. */
+     * Board intersections start at BG tile (BOARD_BG_X, BOARD_BG_Y).
+     * The 256x256 BG wraps; scroll offsets place the board center
+     * at the screen center, with empty tiles filling the margins. */
     uint8_t offset_x = (SCREEN_W * 8 - g->width * CELL_W) / 2;
     uint8_t offset_y = (SCREEN_H * 8 - g->height * CELL_H) / 2;
 
-    SCX_REG = (uint8_t)(-(int16_t)offset_x);
-    base_scy = (uint8_t)(-(int16_t)offset_y - 1);
+    SCX_REG = (uint8_t)(BOARD_BG_X * 8 - (int16_t)offset_x);
+    base_scy = (uint8_t)(BOARD_BG_Y * 8 - (int16_t)offset_y - 1);
     SCY_REG = base_scy;
 
     /* Precompute timer parameters for 262 KHz with dummy fire.

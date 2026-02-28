@@ -28,9 +28,8 @@
  *   Do NOT place manually-addressed objects here.
  *
  * Tile allocation at 0x8000:
- *   0        = blank (solid color-index-0, i.e. black)
- *   1 .. 12  = sprite sheet tiles (loaded from png2asset data)
- *   13..255  = free
+ *   0 .. TILE_COUNT-1  = png2asset tiles (see enum below)
+ *   TILE_COUNT..255    = free
  */
 
 /* ------------------------------------------------------------------ */
@@ -74,23 +73,91 @@ _Static_assert(sizeof(sram_layout_t) <= 0x2000u, "SRAM overflow");
 /* Base address value for set_tile_data() to target 0x8000. */
 #define TILE_DATA_BASE 0x80
 
-/* Tile offset: tiles 1..N follow the blank tile at index 0. */
-#define TILE_OFFSET 1
+/* Tile indices — sequential order matches png2asset output.
+ * The PNG is scanned left-to-right, top-to-bottom; duplicate (empty)
+ * tiles are deduplicated so only TILE_EMPTY occupies index 0. */
+enum {
+    TILE_EMPTY = 0,
 
-/* Tile indices (sprite-sheet position + offset). */
-#define TILE_BLANK 0
-#define TILE_CURSOR (0 + TILE_OFFSET)
-#define TILE_STONE_W (1 + TILE_OFFSET)
-#define TILE_STONE_B (2 + TILE_OFFSET)
-#define TILE_CORNER_TL (3 + TILE_OFFSET)
-#define TILE_EDGE_T (4 + TILE_OFFSET)
-#define TILE_CORNER_TR (5 + TILE_OFFSET)
-#define TILE_EDGE_L (6 + TILE_OFFSET)
-#define TILE_CENTER (7 + TILE_OFFSET)
-#define TILE_EDGE_R (8 + TILE_OFFSET)
-#define TILE_CORNER_BL (9 + TILE_OFFSET)
-#define TILE_EDGE_B (10 + TILE_OFFSET)
-#define TILE_CORNER_BR (11 + TILE_OFFSET)
+    /* Board frame (11 tiles). */
+    TILE_FRAME_TL,
+    TILE_FRAME_T,
+    TILE_FRAME_TR,
+    TILE_FRAME_L,
+    TILE_FRAME_R,
+    TILE_FRAME_BL_U,
+    TILE_FRAME_B_U,
+    TILE_FRAME_BR_U,
+    TILE_FRAME_BL_D,
+    TILE_FRAME_B_D,
+    TILE_FRAME_BR_D,
+
+    /* Board surface intersections (9 tiles). */
+    TILE_CORNER_TL,
+    TILE_EDGE_T,
+    TILE_CORNER_TR,
+    TILE_EDGE_L,
+    TILE_CENTER,
+    TILE_EDGE_R,
+    TILE_CORNER_BL,
+    TILE_EDGE_B,
+    TILE_CORNER_BR,
+
+    /* Star point. */
+    TILE_HOSHI,
+
+    /* Stones. */
+    TILE_STONE_B,
+    TILE_STONE_W,
+
+    /* Last-played stone markers. */
+    TILE_LAST_B,
+    TILE_LAST_W,
+
+    /* Ko-point surface intersections (9 tiles). */
+    TILE_KO_TL,
+    TILE_KO_T,
+    TILE_KO_TR,
+    TILE_KO_L,
+    TILE_KO_C,
+    TILE_KO_R,
+    TILE_KO_BL,
+    TILE_KO_B,
+    TILE_KO_BR,
+
+    /* Black territory markers (9 tiles). */
+    TILE_TERR_B_TL,
+    TILE_TERR_B_T,
+    TILE_TERR_B_TR,
+    TILE_TERR_B_L,
+    TILE_TERR_B_C,
+    TILE_TERR_B_R,
+    TILE_TERR_B_BL,
+    TILE_TERR_B_B,
+    TILE_TERR_B_BR,
+
+    /* White territory markers (9 tiles). */
+    TILE_TERR_W_TL,
+    TILE_TERR_W_T,
+    TILE_TERR_W_TR,
+    TILE_TERR_W_L,
+    TILE_TERR_W_C,
+    TILE_TERR_W_R,
+    TILE_TERR_W_BL,
+    TILE_TERR_W_B,
+    TILE_TERR_W_BR,
+
+    /* Cursor sprites. */
+    TILE_CURSOR,
+    TILE_CURSOR2,
+
+    TILE_COUNT
+};
+
+/* Board origin in the BG tilemap.  The board surface is drawn at
+ * (BOARD_BG_X, BOARD_BG_Y) to leave room for the frame around it. */
+#define BOARD_BG_X 1
+#define BOARD_BG_Y 1
 
 /* ------------------------------------------------------------------ */
 /*  Screen / board positioning                                        */

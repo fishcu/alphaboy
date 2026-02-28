@@ -95,7 +95,8 @@ void cursor_update(cursor_t *c, const input_t *inp, const game_t *g) {
     uint8_t moved = (c->col != old_col || c->row != old_row);
     if (moved || c->dirty) {
         if (c->ghost_tile && moved)
-            vram_set_tile(old_col, old_row, c->surface_cache);
+            vram_set_tile(old_col + BOARD_BG_X, old_row + BOARD_BG_Y,
+                          c->surface_cache);
         recompute_ghost(c, g);
         c->dirty = 0;
     }
@@ -113,7 +114,7 @@ void cursor_update(cursor_t *c, const input_t *inp, const game_t *g) {
 void cursor_draw(const cursor_t *c) {
     if (c->ghost_tile) {
         uint8_t tile = (frame_count & 1) ? c->ghost_tile : c->surface_cache;
-        vram_set_tile(c->col, c->row, tile);
+        vram_set_tile(c->col + BOARD_BG_X, c->row + BOARD_BG_Y, tile);
     }
 
     uint8_t px = (c->x + 128) >> 8;

@@ -113,7 +113,8 @@ static void remove_captured(game_t *g, uint8_t *opp, const uint16_t *queue,
         BF_CLR(opp, pos);
         uint8_t row = pos / BOARD_MAX_EXTENT - BOARD_MARGIN;
         uint8_t col = pos % BOARD_MAX_EXTENT - BOARD_MARGIN;
-        vram_set_tile(col, row, surface_tile(col, row, g->width, g->height));
+        vram_set_tile(col + BOARD_BG_X, row + BOARD_BG_Y,
+                      surface_tile(col, row, g->width, g->height));
     }
     *captured_total += group_size;
     *captured_at = queue[0];
@@ -188,7 +189,8 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
     }
 
     /* Move is legal — commit the stone tile to VRAM. */
-    vram_set_tile(col, row, (color == BLACK) ? TILE_STONE_B : TILE_STONE_W);
+    vram_set_tile(col + BOARD_BG_X, row + BOARD_BG_Y,
+                  (color == BLACK) ? TILE_STONE_B : TILE_STONE_W);
     if (g->move_count >= g->history_base + HISTORY_MAX)
         g->history_base++;
     g->history[g->move_count++ % HISTORY_MAX] = move;
@@ -230,7 +232,7 @@ undo_result_t game_undo(game_t *g, uint16_t *queue) {
                 uint16_t pos = queue[head++];
                 uint8_t r = pos / BOARD_MAX_EXTENT - BOARD_MARGIN;
                 uint8_t c = pos % BOARD_MAX_EXTENT - BOARD_MARGIN;
-                vram_set_tile(c, r, opp_tile);
+                vram_set_tile(c + BOARD_BG_X, r + BOARD_BG_Y, opp_tile);
                 for (uint8_t dd = 0; dd < 4; dd++) {
                     uint16_t adj = pos + dirs[dd];
                     if (!BF_GET(g->on_board, adj))
@@ -248,7 +250,8 @@ undo_result_t game_undo(game_t *g, uint16_t *queue) {
         BF_CLR(own, coord);
         uint8_t row = coord / BOARD_MAX_EXTENT - BOARD_MARGIN;
         uint8_t col = coord % BOARD_MAX_EXTENT - BOARD_MARGIN;
-        vram_set_tile(col, row, surface_tile(col, row, g->width, g->height));
+        vram_set_tile(col + BOARD_BG_X, row + BOARD_BG_Y,
+                      surface_tile(col, row, g->width, g->height));
     }
 
     /* Restore ko state.  The early-out above guarantees that when

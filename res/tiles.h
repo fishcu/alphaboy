@@ -11,19 +11,19 @@
 #define tiles_TILE_ORIGIN 0
 #define tiles_TILE_W 8
 #define tiles_TILE_H 8
-#define tiles_WIDTH 96
-#define tiles_HEIGHT 8
-#define tiles_TILE_COUNT 12
+#define tiles_WIDTH 64
+#define tiles_HEIGHT 256
+#define tiles_TILE_COUNT 54
 #define tiles_PALETTE_COUNT 1
 #define tiles_COLORS_PER_PALETTE 4
 #define tiles_TOTAL_COLORS 4
 #define tiles_MAP_ATTRIBUTES 0
-extern const unsigned char tiles_map[12];
+extern const unsigned char tiles_map[256];
 #define tiles_map_attributes tiles_map
 
 BANKREF_EXTERN(tiles)
 
 extern const palette_color_t tiles_palettes[4];
-extern const uint8_t tiles_tiles[192];
+extern const uint8_t tiles_tiles[864];
 
 #endif
