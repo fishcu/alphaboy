@@ -129,7 +129,7 @@ static void board_redraw(const game_t *g) {
             vram_set_tile(col + BOARD_BG_X, row + BOARD_BG_Y, tile);
             p++;
         }
-        pos += BOARD_MAX_EXTENT;
+        pos += DIR_DOWN;
     }
 
     /* ---- Last-played marker ---- */
@@ -138,8 +138,8 @@ static void board_redraw(const game_t *g) {
         move_t last = g->history[(g->move_count - 1) % HISTORY_MAX];
         uint16_t lc = MOVE_COORD(last);
         if (lc != COORD_PASS) {
-            uint8_t lr = lc / BOARD_MAX_EXTENT - BOARD_MARGIN;
-            uint8_t lx = lc % BOARD_MAX_EXTENT - BOARD_MARGIN;
+            uint8_t lr = COORD_PR(lc) - BOARD_MARGIN;
+            uint8_t lx = COORD_PC(lc) - BOARD_MARGIN;
             vram_set_tile(lx + BOARD_BG_X, lr + BOARD_BG_Y,
                           (MOVE_COLOR(last) == BLACK) ? TILE_LAST_B
                                                       : TILE_LAST_W);
