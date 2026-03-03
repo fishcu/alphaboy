@@ -8,7 +8,7 @@
  * Board is drawn at BG tile (0,0) and centered via scroll registers.
  * OAM X = screen_offset + col*CELL_W + 8 (OAM hardware offset). */
 static uint16_t target_x(uint8_t col, uint8_t board_w) {
-    uint8_t offset = (SCREEN_W * 8 - board_w * CELL_W) / 2;
+    uint8_t offset = (SCREEN_W * 8 - board_w * CELL_W) / 2 - 1;
     return (uint16_t)(offset + col * CELL_W + 8) << 8;
 }
 
@@ -16,7 +16,7 @@ static uint16_t target_x(uint8_t col, uint8_t board_w) {
  * Vertical compression: each cell is CELL_H pixels on screen.
  * OAM Y = screen_offset + row*CELL_H + 16 (OAM hardware offset). */
 static uint16_t target_y(uint8_t row, uint8_t board_h) {
-    uint8_t offset = (SCREEN_H * 8 - board_h * CELL_H) / 2;
+    uint8_t offset = (SCREEN_H * 8 - board_h * CELL_H) / 2 - SCROLL_ADJUST_Y;
     return (uint16_t)(offset + row * CELL_H + 15) << 8;
 }
 

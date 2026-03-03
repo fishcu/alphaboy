@@ -188,9 +188,27 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
         return MOVE_SUICIDAL;
     }
 
-    /* Move is legal — commit the stone tile to VRAM. */
+    /* Move is legal — un-mark previous last-played stone. */
+    if (g->move_count > g->history_base) {
+        move_t prev = g->history[(g->move_count - 1) % HISTORY_MAX];
+        uint16_t pc = MOVE_COORD(prev);
+        if (pc != COORD_PASS) {
+            uint8_t prev_color = MOVE_COLOR(prev);
+            uint8_t *prev_field =
+                (prev_color == BLACK) ? g->black_stones : g->white_stones;
+            if (BF_GET(prev_field, pc)) {
+                uint8_t pr = pc / BOARD_MAX_EXTENT - BOARD_MARGIN;
+                uint8_t px = pc % BOARD_MAX_EXTENT - BOARD_MARGIN;
+                vram_set_tile(px + BOARD_BG_X, pr + BOARD_BG_Y,
+                              (prev_color == BLACK) ? TILE_STONE_B
+                                                    : TILE_STONE_W);
+            }
+        }
+    }
+
+    /* Commit the new stone with last-played marker. */
     vram_set_tile(col + BOARD_BG_X, row + BOARD_BG_Y,
-                  (color == BLACK) ? TILE_STONE_B : TILE_STONE_W);
+                  (color == BLACK) ? TILE_LAST_B : TILE_LAST_W);
     if (g->move_count >= g->history_base + HISTORY_MAX)
         g->history_base++;
     g->history[g->move_count++ % HISTORY_MAX] = move;
@@ -270,6 +288,19 @@ undo_result_t game_undo(game_t *g, uint16_t *queue) {
             }
         } else {
             g->ko = COORD_PASS;
+        }
+    }
+
+    /* Mark the now-current last move as last-played. */
+    if (g->move_count > g->history_base) {
+        move_t last = g->history[(g->move_count - 1) % HISTORY_MAX];
+        uint16_t lc = MOVE_COORD(last);
+        if (lc != COORD_PASS) {
+            uint8_t lr = lc / BOARD_MAX_EXTENT - BOARD_MARGIN;
+            uint8_t lx = lc % BOARD_MAX_EXTENT - BOARD_MARGIN;
+            vram_set_tile(lx + BOARD_BG_X, lr + BOARD_BG_Y,
+                          (MOVE_COLOR(last) == BLACK) ? TILE_LAST_B
+                                                      : TILE_LAST_W);
         }
     }
 

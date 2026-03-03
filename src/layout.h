@@ -125,12 +125,12 @@ enum {
     TILE_KO_B,
     TILE_KO_BR,
 
-    /* Black territory markers (9 tiles). */
+    /* Black territory markers (8 unique tiles + 1 deduplicated). */
     TILE_TERR_B_TL,
     TILE_TERR_B_T,
     TILE_TERR_B_TR,
     TILE_TERR_B_L,
-    TILE_TERR_B_C,
+    /* TILE_TERR_B_C is identical to TILE_HOSHI; defined as alias below. */
     TILE_TERR_B_R,
     TILE_TERR_B_BL,
     TILE_TERR_B_B,
@@ -154,6 +154,9 @@ enum {
     TILE_COUNT
 };
 
+/* Deduplicated: TILE_TERR_B_C has identical tile data to TILE_HOSHI. */
+#define TILE_TERR_B_C TILE_HOSHI
+
 /* Board origin in the BG tilemap.  The board surface is drawn at
  * (BOARD_BG_X, BOARD_BG_Y) to leave room for the frame around it. */
 #define BOARD_BG_X 1
@@ -171,6 +174,9 @@ enum {
  * giving 7 visible rows per cell.  Horizontal is uncompressed. */
 #define CELL_W 8
 #define CELL_H 7
+
+/* Extra upward pixel shift so the board + frame fits on screen. */
+#define SCROLL_ADJUST_Y 2
 
 /* ------------------------------------------------------------------ */
 /*  OAM sprite allocation                                             */

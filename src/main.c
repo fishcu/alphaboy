@@ -40,6 +40,20 @@ uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
         return TILE_EDGE_L;
     if (right)
         return TILE_EDGE_R;
+
+    /* Star-point (hoshi) check for interior intersections.
+     * >= 13: 4th line from edge, corners + sides + center.
+     * < 13:  3rd line from edge, corners + center only. */
+    uint8_t d = (w >= 13 && h >= 13) ? 3 : 2;
+    uint8_t on_col = (col == d || col == w - 1 - d || col == w / 2);
+    uint8_t on_row = (row == d || row == h - 1 - d || row == h / 2);
+    if (on_col && on_row) {
+        if (w >= 13 && h >= 13)
+            return TILE_HOSHI;
+        if ((col == w / 2) == (row == h / 2))
+            return TILE_HOSHI;
+    }
+
     return TILE_CENTER;
 }
 
@@ -106,6 +120,20 @@ static void board_redraw(const game_t *g) {
             p++;
         }
         pos += BOARD_MAX_EXTENT;
+    }
+
+    /* ---- Last-played marker ---- */
+
+    if (g->move_count > g->history_base) {
+        move_t last = g->history[(g->move_count - 1) % HISTORY_MAX];
+        uint16_t lc = MOVE_COORD(last);
+        if (lc != COORD_PASS) {
+            uint8_t lr = lc / BOARD_MAX_EXTENT - BOARD_MARGIN;
+            uint8_t lx = lc % BOARD_MAX_EXTENT - BOARD_MARGIN;
+            vram_set_tile(lx + BOARD_BG_X, lr + BOARD_BG_Y,
+                          (MOVE_COLOR(last) == BLACK) ? TILE_LAST_B
+                                                      : TILE_LAST_W);
+        }
     }
 }
 
@@ -197,7 +225,7 @@ void main(void) {
      * Shades: 0=white, 1=light, 2=dark, 3=black.
      * Sprite index 0 is always transparent regardless of OBP value. */
     BGP_REG = DMG_PAL(0, 1, 2, 3);
-    OBP0_REG = DMG_PAL(0, 0, 3, 2);
+    OBP0_REG = DMG_PAL(0, 0, 2, 3);
 
     /* Load tiles to 0x8000 (shared BG + Sprite region). */
     set_tile_data(0, tiles_TILE_COUNT, tiles_tiles, TILE_DATA_BASE);
@@ -217,12 +245,13 @@ void main(void) {
 #endif
     board_redraw(g);
 
-    /* Center the board on screen via BG scroll registers.
+    /* Position the board on screen via BG scroll registers.
      * Board intersections start at BG tile (BOARD_BG_X, BOARD_BG_Y).
-     * The 256x256 BG wraps; scroll offsets place the board center
-     * at the screen center, with empty tiles filling the margins. */
+     * The 256x256 BG wraps; scroll offsets place the board roughly
+     * centered, shifted up by SCROLL_ADJUST_Y to show the bottom frame. */
     uint8_t offset_x = (SCREEN_W * 8 - g->width * CELL_W) / 2;
-    uint8_t offset_y = (SCREEN_H * 8 - g->height * CELL_H) / 2;
+    uint8_t offset_y =
+        (SCREEN_H * 8 - g->height * CELL_H) / 2 - SCROLL_ADJUST_Y;
 
     SCX_REG = (uint8_t)(BOARD_BG_X * 8 - (int16_t)offset_x);
     base_scy = (uint8_t)(BOARD_BG_Y * 8 - (int16_t)offset_y - 1);
