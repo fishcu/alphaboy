@@ -96,6 +96,12 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
 /* ---- Play a move ---- */
 
 void game_play_pass(game_t *g, uint8_t color) {
+    if (g->ko != COORD_PASS) {
+        uint8_t kr = g->ko / BOARD_MAX_EXTENT - BOARD_MARGIN;
+        uint8_t kc = g->ko % BOARD_MAX_EXTENT - BOARD_MARGIN;
+        vram_set_tile(kc + BOARD_BG_X, kr + BOARD_BG_Y,
+                      surface_tile(kc, kr, g->width, g->height));
+    }
     g->ko = COORD_PASS;
     if (g->move_count >= g->history_base + HISTORY_MAX)
         g->history_base++;
@@ -170,22 +176,33 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
             own_liberties++;
     }
 
-    /* Ko: exactly one stone captured, the played stone is a lone stone,
-     * and that lone stone is in atari (could be recaptured immediately). */
-    if (captured_total == 1 && is_single && own_liberties == 1) {
-        g->ko = captured_at;
-        move |= (1u << MOVE_KO_BIT);
-    } else {
-        g->ko = COORD_PASS;
-    }
-
-    /* Suicide check: if nothing was captured and the played stone has
-     * no immediate liberty, flood-fill the full group.  When at least
-     * one direct liberty exists the group is trivially alive. */
+    /* Suicide: only possible when nothing was captured and the played
+     * stone has no immediate liberty.  Checked before touching g->ko
+     * so an illegal attempt leaves the ko state undisturbed. */
     if (captured_total == 0 && own_liberties == 0 &&
         group_liberties(g, coord, own, visited, queue, &group_size) == 0) {
         BF_CLR(own, coord);
         return MOVE_SUICIDAL;
+    }
+
+    /* Clear previous ko marker tile. */
+    if (g->ko != COORD_PASS) {
+        uint8_t kr = g->ko / BOARD_MAX_EXTENT - BOARD_MARGIN;
+        uint8_t kc = g->ko % BOARD_MAX_EXTENT - BOARD_MARGIN;
+        vram_set_tile(kc + BOARD_BG_X, kr + BOARD_BG_Y,
+                      surface_tile(kc, kr, g->width, g->height));
+    }
+
+    /* Set new ko state and tile. */
+    if (captured_total == 1 && is_single && own_liberties == 1) {
+        g->ko = captured_at;
+        move |= (1u << MOVE_KO_BIT);
+        uint8_t kr = g->ko / BOARD_MAX_EXTENT - BOARD_MARGIN;
+        uint8_t kc = g->ko % BOARD_MAX_EXTENT - BOARD_MARGIN;
+        vram_set_tile(kc + BOARD_BG_X, kr + BOARD_BG_Y,
+                      ko_tile(kc, kr, g->width, g->height));
+    } else {
+        g->ko = COORD_PASS;
     }
 
     /* Move is legal — un-mark previous last-played stone. */
@@ -289,6 +306,14 @@ undo_result_t game_undo(game_t *g, uint16_t *queue) {
         } else {
             g->ko = COORD_PASS;
         }
+    }
+
+    /* Write ko tile if the restored state has an active ko. */
+    if (g->ko != COORD_PASS) {
+        uint8_t kr = g->ko / BOARD_MAX_EXTENT - BOARD_MARGIN;
+        uint8_t kc = g->ko % BOARD_MAX_EXTENT - BOARD_MARGIN;
+        vram_set_tile(kc + BOARD_BG_X, kr + BOARD_BG_Y,
+                      ko_tile(kc, kr, g->width, g->height));
     }
 
     /* Mark the now-current last move as last-played. */

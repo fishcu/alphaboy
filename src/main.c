@@ -57,6 +57,16 @@ uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
     return TILE_CENTER;
 }
 
+/* Return the ko-marked variant of a surface tile for an empty
+ * intersection.  Ko tiles mirror the 9 surface intersection tiles
+ * at a fixed offset; hoshi maps to the center ko tile. */
+uint8_t ko_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
+    uint8_t t = surface_tile(col, row, w, h);
+    if (t == TILE_HOSHI)
+        t = TILE_CENTER;
+    return t + (TILE_KO_TL - TILE_CORNER_TL);
+}
+
 /* ---- Lightweight VRAM tile write ----
  * Writes one byte to the BG tilemap without disabling interrupts.
  * Waits for VRAM-accessible mode (HBlank or VBlank), then stores.
