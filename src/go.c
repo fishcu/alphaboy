@@ -37,7 +37,7 @@ static uint8_t group_liberties(const game_t *g, uint16_t seed,
 
     while (head < tail) {
         uint16_t pos = flood_deque[head++];
-        for (uint8_t d = 0; d < 4; d++) {
+        for (uint8_t d = 4; d--;) {
             uint16_t nb = pos + dirs[d];
             if (BF_GET(flood_visited, nb))
                 continue;
@@ -72,7 +72,7 @@ static uint8_t group_has_liberty(const game_t *g, uint16_t seed,
 
     while (head < tail) {
         uint16_t pos = flood_deque[head++];
-        for (uint8_t d = 0; d < 4; d++) {
+        for (uint8_t d = 4; d--;) {
             uint16_t nb = pos + dirs[d];
             if (BF_GET(flood_visited, nb))
                 continue;
@@ -193,14 +193,14 @@ static void game_commit_move(game_t *g, uint16_t coord, uint8_t color,
     if (captured_total == 1 && own_liberties == 1) {
         uint8_t *own = (color == BLACK) ? g->black_stones : g->white_stones;
         uint8_t is_single = 1;
-        for (uint8_t d = 0; d < 4; d++) {
+        for (uint8_t d = 4; d--;) {
             if (BF_GET(own, coord + dirs[d])) {
                 is_single = 0;
                 break;
             }
         }
         if (is_single) {
-            for (uint8_t d = 0; d < 4; d++) {
+            for (uint8_t d = 4; d--;) {
                 if (cap_dirs & (1u << d)) {
                     g->ko = coord + dirs[d];
                     break;
@@ -265,7 +265,7 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
     uint8_t captured_total = 0;
     uint8_t own_liberties = 0;
 
-    for (uint8_t d = 0; d < 4; d++) {
+    for (uint8_t d = 4; d--;) {
         uint16_t nb = coord + dirs[d];
         uint8_t bi = BF_BYTE(nb);
         uint8_t bm = BF_MASK(nb);
@@ -326,7 +326,7 @@ undo_result_t game_undo(game_t *g) {
          * Each captured group's empty region is fully enclosed by the
          * capturing player's stones and the board edge, so a BFS from
          * the capture-direction neighbor recovers exactly the group. */
-        for (uint8_t d = 0; d < 4; d++) {
+        for (uint8_t d = 4; d--;) {
             if (!(move & (1u << (MOVE_CAP_SHIFT + d))))
                 continue;
 
@@ -340,7 +340,7 @@ undo_result_t game_undo(game_t *g) {
             while (head < tail) {
                 uint16_t pos = flood_deque[head++];
                 vram_set_tile(pos, opp_tile);
-                for (uint8_t dd = 0; dd < 4; dd++) {
+                for (uint8_t dd = 4; dd--;) {
                     uint16_t adj = pos + dirs[dd];
                     if (!BF_GET(g->on_board, adj))
                         continue;
@@ -367,7 +367,7 @@ undo_result_t game_undo(game_t *g) {
         move_t prev = g->history[(g->move_count - 1) % HISTORY_MAX];
         if (prev & (1u << MOVE_KO_BIT)) {
             uint16_t prev_coord = MOVE_COORD(prev);
-            for (uint8_t d = 0; d < 4; d++) {
+            for (uint8_t d = 4; d--;) {
                 if (prev & (1u << (MOVE_CAP_SHIFT + d))) {
                     g->ko = prev_coord + dirs[d];
                     break;
