@@ -16,39 +16,12 @@ static const int16_t dirs[4] = {DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT};
 
 /* ---- Flood fill for liberty detection ---- */
 
-/* Neighbor check body used by group_liberties.  Operates on the
- * enclosing scope's bi/bm (precomputed for this neighbor), and
- * enqueues same-color stones with bi packed into the upper bits.
- * Queue entries: bits 15-10 = BF byte index, bits 9-0 = packed coord. */
-#define GL_CHECK_NB(nb)                                                        \
-    do {                                                                       \
-        if (!(visited[bi] & bm)) {                                             \
-            if (stones[bi] & bm) {                                             \
-                visited[bi] |= bm;                                             \
-                queue[tail++] = ((uint16_t)bi << 10) | (nb);                   \
-            } else if ((g->on_board[bi] & bm) &&                               \
-                       !(g->black_stones[bi] & bm) &&                          \
-                       !(g->white_stones[bi] & bm)) {                          \
-                if (liberties < UINT8_MAX)                                     \
-                    liberties++;                                               \
-            }                                                                  \
-        }                                                                      \
-    } while (0)
-
 /* Flood-fill the group containing `seed`, recording every stone in
  * `queue[0..*group_size-1]`.  Uses BFS to fully traverse the group
  * (no early-out) so that `visited` stays complete across calls.
  * `stones` is the bitfield of the color to follow (black or white).
  * Precondition: seed must not already be in `visited`.
- * Returns the number of liberties (capped at UINT8_MAX); 0 = captured.
- *
- * Queue entries pack the BF byte index in bits 15-10 to avoid
- * recomputing BF_BYTE on dequeue.  Consumers must mask with
- * MOVE_COORD_MASK to recover the packed coordinate.
- *
- * The four-direction loop is unrolled so that each neighbor's BF byte
- * index and mask are derived incrementally from the dequeued node,
- * eliminating all BF_BYTE calls from the inner loop. */
+ * Returns the number of liberties (capped at UINT8_MAX); 0 = captured. */
 static uint8_t group_liberties(const game_t *g, uint16_t seed,
                                const uint8_t *stones, uint8_t *visited,
                                uint16_t *queue, uint16_t *group_size) {
@@ -58,52 +31,31 @@ static uint8_t group_liberties(const game_t *g, uint16_t seed,
     uint16_t tail = 0;
     uint8_t liberties = 0;
 
-    uint8_t seed_bi = BF_BYTE(seed);
-    visited[seed_bi] |= BF_MASK(seed);
-    queue[tail++] = ((uint16_t)seed_bi << 10) | seed;
+    BF_SET(visited, seed);
+    queue[tail++] = seed;
 
     while (head < tail) {
-        uint16_t entry = queue[head++];
-        uint16_t pos = entry & MOVE_COORD_MASK;
-        uint8_t pos_bi = (uint8_t)(entry >> 10);
-        uint8_t pos_bm = BF_MASK(pos);
-
-        uint8_t bi, bm;
-
-        /* UP: same column, previous row. */
-        bi = pos_bi - BF_ROW_BYTES;
-        bm = pos_bm;
-        GL_CHECK_NB(pos + DIR_UP);
-
-        /* DOWN: same column, next row. */
-        bi = pos_bi + BF_ROW_BYTES;
-        bm = pos_bm;
-        GL_CHECK_NB(pos + DIR_DOWN);
-
-        /* LEFT: previous column, byte boundary when mask underflows. */
-        bi = pos_bi;
-        bm = pos_bm >> 1;
-        if (!bm) {
-            bm = 0x80;
-            bi--;
+        uint16_t pos = queue[head++];
+        for (uint8_t d = 0; d < 4; d++) {
+            uint16_t nb = pos + dirs[d];
+            uint8_t bi = BF_BYTE(nb);
+            uint8_t bm = BF_MASK(nb);
+            if (visited[bi] & bm)
+                continue;
+            if (stones[bi] & bm) {
+                visited[bi] |= bm;
+                queue[tail++] = nb;
+            } else if ((g->on_board[bi] & bm) && !(g->black_stones[bi] & bm) &&
+                       !(g->white_stones[bi] & bm)) {
+                if (liberties < UINT8_MAX)
+                    liberties++;
+            }
         }
-        GL_CHECK_NB(pos + DIR_LEFT);
-
-        /* RIGHT: next column, byte boundary when mask overflows. */
-        bi = pos_bi;
-        bm = (uint8_t)(pos_bm << 1);
-        if (!bm) {
-            bm = 1;
-            bi++;
-        }
-        GL_CHECK_NB(pos + DIR_RIGHT);
     }
 
     *group_size = tail;
     return liberties;
 }
-
-#undef GL_CHECK_NB
 
 void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
     assert(width >= BOARD_MIN_SIZE && width <= BOARD_MAX_SIZE &&
@@ -128,12 +80,11 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
      * avoiding any multiplication in the loop. */
     uint16_t pos = BOARD_COORD(0, 0);
     for (uint8_t row = 0; row < height; row++) {
-        uint16_t p = pos;
         for (uint8_t col = 0; col < width; col++) {
-            BF_SET(g->on_board, p);
-            p++;
+            BF_SET(g->on_board, pos);
+            pos++;
         }
-        pos += DIR_DOWN;
+        pos += DIR_DOWN - width;
     }
 }
 
@@ -141,35 +92,13 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
 
 void game_play_pass(game_t *g, uint8_t color) {
     if (g->ko != COORD_PASS) {
-        uint8_t kr = COORD_PR(g->ko) - BOARD_MARGIN;
-        uint8_t kc = COORD_PC(g->ko) - BOARD_MARGIN;
-        vram_set_tile(kc + BOARD_BG_X, kr + BOARD_BG_Y,
-                      surface_tile(kc, kr, g->width, g->height));
+        vram_set_tile(g->ko, surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
+                                          g->width, g->height));
     }
     g->ko = COORD_PASS;
     if (g->move_count >= g->history_base + HISTORY_MAX)
         g->history_base++;
     g->history[g->move_count++ % HISTORY_MAX] = MOVE_MAKE(COORD_PASS, color);
-}
-
-/* Remove captured stones listed in `queue[0..group_size-1]`.
- * Queue entries have the BF byte index packed in bits 15-10;
- * the packed coordinate is recovered by masking with MOVE_COORD_MASK.
- * Clears each stone from `opp`, writes the appropriate surface tile
- * to VRAM, and accumulates the capture count/position for ko. */
-static void remove_captured(game_t *g, uint8_t *opp, const uint16_t *queue,
-                            uint16_t group_size, uint16_t *captured_total,
-                            uint16_t *captured_at) {
-    for (uint16_t i = 0; i < group_size; i++) {
-        uint16_t pos = queue[i] & MOVE_COORD_MASK;
-        BF_CLR(opp, pos);
-        uint8_t row = COORD_PR(pos) - BOARD_MARGIN;
-        uint8_t col = COORD_PC(pos) - BOARD_MARGIN;
-        vram_set_tile(col + BOARD_BG_X, row + BOARD_BG_Y,
-                      surface_tile(col, row, g->width, g->height));
-    }
-    *captured_total += group_size;
-    *captured_at = queue[0] & MOVE_COORD_MASK;
 }
 
 move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
@@ -214,8 +143,15 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
 
         if ((opp[bi] & bm) && !(visited[bi] & bm)) {
             if (group_liberties(g, nb, opp, visited, queue, &group_size) == 0) {
-                remove_captured(g, opp, queue, group_size, &captured_total,
-                                &captured_at);
+                for (uint16_t i = 0; i < group_size; i++) {
+                    uint16_t cap = queue[i];
+                    BF_CLR(opp, cap);
+                    vram_set_tile(cap,
+                                  surface_tile(BOARD_COL(cap), BOARD_ROW(cap),
+                                               g->width, g->height));
+                }
+                captured_total += group_size;
+                captured_at = queue[0];
                 move |= (1u << (MOVE_CAP_SHIFT + d));
             }
         }
@@ -237,20 +173,16 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
 
     /* Clear previous ko marker tile. */
     if (g->ko != COORD_PASS) {
-        uint8_t kr = COORD_PR(g->ko) - BOARD_MARGIN;
-        uint8_t kc = COORD_PC(g->ko) - BOARD_MARGIN;
-        vram_set_tile(kc + BOARD_BG_X, kr + BOARD_BG_Y,
-                      surface_tile(kc, kr, g->width, g->height));
+        vram_set_tile(g->ko, surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
+                                          g->width, g->height));
     }
 
     /* Set new ko state and tile. */
     if (captured_total == 1 && is_single && own_liberties == 1) {
         g->ko = captured_at;
         move |= (1u << MOVE_KO_BIT);
-        uint8_t kr = COORD_PR(g->ko) - BOARD_MARGIN;
-        uint8_t kc = COORD_PC(g->ko) - BOARD_MARGIN;
-        vram_set_tile(kc + BOARD_BG_X, kr + BOARD_BG_Y,
-                      ko_tile(kc, kr, g->width, g->height));
+        vram_set_tile(g->ko, ko_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
+                                     g->width, g->height));
     } else {
         g->ko = COORD_PASS;
     }
@@ -264,18 +196,14 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
             uint8_t *prev_field =
                 (prev_color == BLACK) ? g->black_stones : g->white_stones;
             if (BF_GET(prev_field, pc)) {
-                uint8_t pr = COORD_PR(pc) - BOARD_MARGIN;
-                uint8_t px = COORD_PC(pc) - BOARD_MARGIN;
-                vram_set_tile(px + BOARD_BG_X, pr + BOARD_BG_Y,
-                              (prev_color == BLACK) ? TILE_STONE_B
-                                                    : TILE_STONE_W);
+                vram_set_tile(pc, (prev_color == BLACK) ? TILE_STONE_B
+                                                        : TILE_STONE_W);
             }
         }
     }
 
     /* Commit the new stone with last-played marker. */
-    vram_set_tile(col + BOARD_BG_X, row + BOARD_BG_Y,
-                  (color == BLACK) ? TILE_LAST_B : TILE_LAST_W);
+    vram_set_tile(coord, (color == BLACK) ? TILE_LAST_B : TILE_LAST_W);
     if (g->move_count >= g->history_base + HISTORY_MAX)
         g->history_base++;
     g->history[g->move_count++ % HISTORY_MAX] = move;
@@ -315,10 +243,7 @@ undo_result_t game_undo(game_t *g, uint16_t *queue) {
 
             while (head < tail) {
                 uint16_t pos = queue[head++];
-                uint8_t pr = COORD_PR(pos);
-                uint8_t pc = COORD_PC(pos);
-                vram_set_tile(pc - BOARD_MARGIN + BOARD_BG_X,
-                              pr - BOARD_MARGIN + BOARD_BG_Y, opp_tile);
+                vram_set_tile(pos, opp_tile);
                 for (uint8_t dd = 0; dd < 4; dd++) {
                     uint16_t adj = pos + dirs[dd];
                     uint8_t bi = BF_BYTE(adj);
@@ -336,10 +261,8 @@ undo_result_t game_undo(game_t *g, uint16_t *queue) {
 
         /* Remove the played stone. */
         BF_CLR(own, coord);
-        uint8_t row = COORD_PR(coord) - BOARD_MARGIN;
-        uint8_t col = COORD_PC(coord) - BOARD_MARGIN;
-        vram_set_tile(col + BOARD_BG_X, row + BOARD_BG_Y,
-                      surface_tile(col, row, g->width, g->height));
+        vram_set_tile(coord, surface_tile(BOARD_COL(coord), BOARD_ROW(coord),
+                                          g->width, g->height));
     }
 
     /* Restore ko state.  The early-out above guarantees that when
@@ -363,10 +286,8 @@ undo_result_t game_undo(game_t *g, uint16_t *queue) {
 
     /* Write ko tile if the restored state has an active ko. */
     if (g->ko != COORD_PASS) {
-        uint8_t kr = COORD_PR(g->ko) - BOARD_MARGIN;
-        uint8_t kc = COORD_PC(g->ko) - BOARD_MARGIN;
-        vram_set_tile(kc + BOARD_BG_X, kr + BOARD_BG_Y,
-                      ko_tile(kc, kr, g->width, g->height));
+        vram_set_tile(g->ko, ko_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
+                                     g->width, g->height));
     }
 
     /* Mark the now-current last move as last-played. */
@@ -374,11 +295,8 @@ undo_result_t game_undo(game_t *g, uint16_t *queue) {
         move_t last = g->history[(g->move_count - 1) % HISTORY_MAX];
         uint16_t lc = MOVE_COORD(last);
         if (lc != COORD_PASS) {
-            uint8_t lr = COORD_PR(lc) - BOARD_MARGIN;
-            uint8_t lx = COORD_PC(lc) - BOARD_MARGIN;
-            vram_set_tile(lx + BOARD_BG_X, lr + BOARD_BG_Y,
-                          (MOVE_COLOR(last) == BLACK) ? TILE_LAST_B
-                                                      : TILE_LAST_W);
+            vram_set_tile(lc, (MOVE_COLOR(last) == BLACK) ? TILE_LAST_B
+                                                          : TILE_LAST_W);
         }
     }
 

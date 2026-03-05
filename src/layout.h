@@ -157,10 +157,10 @@ enum {
 /* Deduplicated: TILE_TERR_B_C has identical tile data to TILE_HOSHI. */
 #define TILE_TERR_B_C TILE_HOSHI
 
-/* Board origin in the BG tilemap.  The board surface is drawn at
- * (BOARD_BG_X, BOARD_BG_Y) to leave room for the frame around it. */
-#define BOARD_BG_X 1
-#define BOARD_BG_Y 1
+/* Convenience macro for constructing a tile-map packed coordinate
+ * from raw (x, y) tile-map positions.  Used for frame drawing and
+ * other cold paths that don't operate on board coordinates. */
+#define VRAM_XY(x, y) ((uint16_t)((y) << COORD_SHIFT) | (x))
 
 /* ------------------------------------------------------------------ */
 /*  Screen / board positioning                                        */
@@ -191,9 +191,10 @@ enum {
 /*  Display helpers (defined in main.c)                               */
 /* ------------------------------------------------------------------ */
 
-/* Write one BG-map tile without disabling interrupts.
+/* Write one BG-map tile at packed coordinate `pc` without disabling
+ * interrupts.  `pc` is a tile-map offset: (row << COORD_SHIFT) | col.
  * Waits for VRAM-accessible mode then stores a single byte. */
-void vram_set_tile(uint8_t x, uint8_t y, uint8_t tile);
+void vram_set_tile(uint16_t pc, uint8_t tile);
 
 /* Return the board-surface tile index for an empty intersection. */
 uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h);

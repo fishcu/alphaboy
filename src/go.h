@@ -17,19 +17,19 @@
  *
  * A board position is encoded as (padded_row << COORD_SHIFT) | padded_col,
  * where padded_row = board_row + BOARD_MARGIN and likewise for col.
- * The stride of 1 << COORD_SHIFT (32) enables shift/mask extraction of
- * row and column from the packed value without division.
+ * The stride of 1 << COORD_SHIFT (32) gives each bitfield row 4 bytes,
+ * directly matching the BG tile map layout (32 tiles per row).
+ * This unifies bitfield addressing, tile-map addressing, and neighbor
+ * arithmetic under a single coordinate representation.
  *
- * Bitfield storage is decoupled: each row is BF_ROW_BYTES (3) wide,
- * so the bitfield only occupies BF_NUM_ROWS * 3 = 63 bytes instead of
- * the 84 bytes a stride-32 flat layout would require. */
+ * BF_BYTE(pc) = pc >> 3, BF_MASK(pc) = 1 << (pc & 7). */
 #define COORD_SHIFT 5
 #define COORD_COL_MASK ((1u << COORD_SHIFT) - 1) /* 0x1F */
 
-/* Bitfield storage dimensions. */
-#define BF_ROW_BYTES 3
+/* Bitfield storage dimensions (4 bytes per row, matching stride 32). */
+#define BF_ROW_BYTES (1 << (COORD_SHIFT - 3)) /* 4 */
 #define BF_NUM_ROWS (BOARD_MAX_SIZE + 2 * BOARD_MARGIN)
-#define BOARD_FIELD_BYTES (BF_ROW_BYTES * BF_NUM_ROWS) /* 63 */
+#define BOARD_FIELD_BYTES (BF_NUM_ROWS * BF_ROW_BYTES) /* 84 */
 
 /* --- Colors --- */
 
@@ -82,21 +82,16 @@ typedef uint16_t move_t;
 
 /* --- Coordinate extraction --- */
 
-/* Extract padded row / column from a packed coordinate.
- * Results include the BOARD_MARGIN offset (padded, not board-relative).
- * COORD_PR uses byte decomposition to avoid a 16-bit shift by 5:
- * the high byte holds the top row bits and the low byte's upper bits
- * hold the bottom row bits, combined with 8-bit shifts only. */
-#define COORD_PR(pc)                                                           \
-    ((uint8_t)(((uint8_t)((pc) >> 8) << 3) | ((uint8_t)(pc) >> 5)))
-#define COORD_PC(pc) ((uint8_t)((pc)&COORD_COL_MASK))
+/* Extract board-relative row / column (0-based, no margin) from a
+ * packed coordinate.  Used in cold paths for surface tile lookups. */
+#define BOARD_ROW(pc) ((uint8_t)((pc) >> COORD_SHIFT) - BOARD_MARGIN)
+#define BOARD_COL(pc) ((uint8_t)((pc)&COORD_COL_MASK) - BOARD_MARGIN)
 
 /* --- Bit-field access helpers --- */
 
-/* Byte index for packed coordinate `pc` in a 3-byte-per-row layout.
- * Uses explicit shift+add for row*3 (avoids SDCC emitting a 16-bit
- * multiply) and uint8_t casts to keep arithmetic 8-bit. */
-#define BF_BYTE(pc) (COORD_PR(pc) + (COORD_PR(pc) << 1) + (COORD_PC(pc) >> 3))
+/* Byte index for packed coordinate `pc`.  Trivial with stride-32 rows:
+ * each row is 4 bytes, and bits within a row map naturally. */
+#define BF_BYTE(pc) ((pc) >> 3)
 
 /* Bit-field mask lookup table (avoids variable shifts on SM83). */
 extern const uint8_t bf_masks[8];

@@ -72,9 +72,8 @@ uint8_t ko_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
  * Waits for VRAM-accessible mode (HBlank or VBlank), then stores.
  * A single byte store completes in 1 M-cycle (4 clocks), well
  * within any VRAM-accessible window. */
-void vram_set_tile(uint8_t x, uint8_t y, uint8_t tile) {
-    volatile uint8_t *addr =
-        (volatile uint8_t *)(0x9800u + ((uint16_t)y << 5) + x);
+void vram_set_tile(uint16_t pc, uint8_t tile) {
+    volatile uint8_t *addr = (volatile uint8_t *)(0x9800u + pc);
     while (STAT_REG & STATF_BUSY) {
     }
     *addr = tile;
@@ -90,28 +89,29 @@ static void board_redraw(const game_t *g) {
     /* ---- Frame ---- */
 
     /* Top row. */
-    vram_set_tile(0, 0, TILE_FRAME_TL);
+    vram_set_tile(0, TILE_FRAME_TL);
     for (uint8_t col = 0; col < w; col++)
-        vram_set_tile(col + BOARD_BG_X, 0, TILE_FRAME_T);
-    vram_set_tile(w + BOARD_BG_X, 0, TILE_FRAME_TR);
+        vram_set_tile(col + BOARD_MARGIN, TILE_FRAME_T);
+    vram_set_tile(w + BOARD_MARGIN, TILE_FRAME_TR);
 
     /* Left and right columns. */
     for (uint8_t row = 0; row < h; row++) {
-        vram_set_tile(0, row + BOARD_BG_Y, TILE_FRAME_L);
-        vram_set_tile(w + BOARD_BG_X, row + BOARD_BG_Y, TILE_FRAME_R);
+        uint16_t ry = VRAM_XY(0, row + BOARD_MARGIN);
+        vram_set_tile(ry, TILE_FRAME_L);
+        vram_set_tile(ry | (w + BOARD_MARGIN), TILE_FRAME_R);
     }
 
     /* Bottom rows (two tiles tall). */
-    uint8_t by1 = h + BOARD_BG_Y;
-    uint8_t by2 = by1 + 1;
-    vram_set_tile(0, by1, TILE_FRAME_BL_U);
-    vram_set_tile(0, by2, TILE_FRAME_BL_D);
+    uint16_t by1 = VRAM_XY(0, h + BOARD_MARGIN);
+    uint16_t by2 = VRAM_XY(0, h + BOARD_MARGIN + 1);
+    vram_set_tile(by1, TILE_FRAME_BL_U);
+    vram_set_tile(by2, TILE_FRAME_BL_D);
     for (uint8_t col = 0; col < w; col++) {
-        vram_set_tile(col + BOARD_BG_X, by1, TILE_FRAME_B_U);
-        vram_set_tile(col + BOARD_BG_X, by2, TILE_FRAME_B_D);
+        vram_set_tile(by1 | (col + BOARD_MARGIN), TILE_FRAME_B_U);
+        vram_set_tile(by2 | (col + BOARD_MARGIN), TILE_FRAME_B_D);
     }
-    vram_set_tile(w + BOARD_BG_X, by1, TILE_FRAME_BR_U);
-    vram_set_tile(w + BOARD_BG_X, by2, TILE_FRAME_BR_D);
+    vram_set_tile(by1 | (w + BOARD_MARGIN), TILE_FRAME_BR_U);
+    vram_set_tile(by2 | (w + BOARD_MARGIN), TILE_FRAME_BR_D);
 
     /* ---- Board intersections ---- */
 
@@ -126,7 +126,7 @@ static void board_redraw(const game_t *g) {
                 tile = TILE_STONE_W;
             else
                 tile = surface_tile(col, row, w, h);
-            vram_set_tile(col + BOARD_BG_X, row + BOARD_BG_Y, tile);
+            vram_set_tile(p, tile);
             p++;
         }
         pos += DIR_DOWN;
@@ -138,11 +138,8 @@ static void board_redraw(const game_t *g) {
         move_t last = g->history[(g->move_count - 1) % HISTORY_MAX];
         uint16_t lc = MOVE_COORD(last);
         if (lc != COORD_PASS) {
-            uint8_t lr = COORD_PR(lc) - BOARD_MARGIN;
-            uint8_t lx = COORD_PC(lc) - BOARD_MARGIN;
-            vram_set_tile(lx + BOARD_BG_X, lr + BOARD_BG_Y,
-                          (MOVE_COLOR(last) == BLACK) ? TILE_LAST_B
-                                                      : TILE_LAST_W);
+            vram_set_tile(lc, (MOVE_COLOR(last) == BLACK) ? TILE_LAST_B
+                                                          : TILE_LAST_W);
         }
     }
 }
@@ -256,15 +253,15 @@ void main(void) {
     board_redraw(g);
 
     /* Position the board on screen via BG scroll registers.
-     * Board intersections start at BG tile (BOARD_BG_X, BOARD_BG_Y).
+     * Board intersections start at BG tile column/row BOARD_MARGIN.
      * The 256x256 BG wraps; scroll offsets place the board roughly
      * centered, shifted up by SCROLL_ADJUST_Y to show the bottom frame. */
     uint8_t offset_x = (SCREEN_W * 8 - g->width * CELL_W) / 2;
     uint8_t offset_y =
         (SCREEN_H * 8 - g->height * CELL_H) / 2 - SCROLL_ADJUST_Y;
 
-    SCX_REG = (uint8_t)(BOARD_BG_X * 8 - (int16_t)offset_x);
-    base_scy = (uint8_t)(BOARD_BG_Y * 8 - (int16_t)offset_y - 1);
+    SCX_REG = (uint8_t)(BOARD_MARGIN * 8 - (int16_t)offset_x);
+    base_scy = (uint8_t)(BOARD_MARGIN * 8 - (int16_t)offset_y - 1);
     SCY_REG = base_scy;
 
     /* Precompute timer parameters for 262 KHz with dummy fire.
