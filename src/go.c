@@ -17,11 +17,13 @@ static const int16_t dirs[4] = {DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT};
 /* ---- Flood fill for liberty detection ---- */
 
 /* Flood-fill the group containing `seed`, recording every stone in
- * flood_stack[0..*group_size-1].  Uses BFS to fully traverse the group
+ * flood_deque[0..tail-1].  Uses BFS to fully traverse the group
  * (no early-out) so that flood_visited stays complete across calls.
  * `stones` is the bitfield of the color to follow (black or white).
  * Precondition: seed must not already be in flood_visited.
- * Returns the number of liberties (capped at UINT8_MAX); 0 = captured. */
+ * Returns the number of liberties (capped at UINT8_MAX); 0 = captured.
+ * After return, flood_deque[0..group_size-1] holds the group coords;
+ * read the returned tail via the `group_size` output parameter. */
 static uint8_t group_liberties(const game_t *g, uint16_t seed,
                                const uint8_t *stones, uint16_t *group_size) {
     assert(!BF_GET(flood_visited, seed) && "seed already visited");
@@ -31,17 +33,17 @@ static uint8_t group_liberties(const game_t *g, uint16_t seed,
     uint8_t liberties = 0;
 
     BF_SET(flood_visited, seed);
-    flood_stack[tail++] = seed;
+    flood_deque[tail++] = seed;
 
     while (head < tail) {
-        uint16_t pos = flood_stack[head++];
+        uint16_t pos = flood_deque[head++];
         for (uint8_t d = 0; d < 4; d++) {
             uint16_t nb = pos + dirs[d];
             if (BF_GET(flood_visited, nb))
                 continue;
             if (BF_GET(stones, nb)) {
                 BF_SET(flood_visited, nb);
-                flood_stack[tail++] = nb;
+                flood_deque[tail++] = nb;
                 continue;
             }
             if (BF_GET(g->on_board, nb) && !BF_GET(g->black_stones, nb) &&
@@ -54,6 +56,39 @@ static uint8_t group_liberties(const game_t *g, uint16_t seed,
 
     *group_size = tail;
     return liberties;
+}
+
+/* Quick suicide test: does the group at `seed` have at least one liberty?
+ * Returns 1 immediately on the first liberty found, 0 if captured.
+ * Does not record group size.  May leave flood_visited incomplete,
+ * so this must be the last flood operation for the current move. */
+static uint8_t group_has_liberty(const game_t *g, uint16_t seed,
+                                 const uint8_t *stones) {
+    uint16_t head = 0;
+    uint16_t tail = 0;
+
+    BF_SET(flood_visited, seed);
+    flood_deque[tail++] = seed;
+
+    while (head < tail) {
+        uint16_t pos = flood_deque[head++];
+        for (uint8_t d = 0; d < 4; d++) {
+            uint16_t nb = pos + dirs[d];
+            if (BF_GET(flood_visited, nb))
+                continue;
+            if (BF_GET(stones, nb)) {
+                BF_SET(flood_visited, nb);
+                flood_deque[tail++] = nb;
+                continue;
+            }
+            if (BF_GET(g->on_board, nb) && !BF_GET(g->black_stones, nb) &&
+                !BF_GET(g->white_stones, nb)) {
+                return 1;
+            }
+        }
+    }
+
+    return 0;
 }
 
 void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
@@ -204,15 +239,15 @@ static void game_commit_move(game_t *g, uint16_t coord, uint8_t color,
 }
 
 move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
+    assert((g->on_board[ci] & cm) && "coord must be on board");
+
     /* Ko check. */
     if (coord == g->ko)
         return MOVE_KO;
 
-    /* Must be an empty on-board intersection. */
     uint8_t ci = BF_BYTE(coord);
     uint8_t cm = BF_MASK(coord);
-    if (!(g->on_board[ci] & cm) || (g->black_stones[ci] & cm) ||
-        (g->white_stones[ci] & cm))
+    if ((g->black_stones[ci] & cm) || (g->white_stones[ci] & cm))
         return MOVE_NON_EMPTY;
 
     bf_clear(flood_visited);
@@ -228,7 +263,6 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
      * and count own liberties for suicide / ko detection. */
     uint8_t cap_dirs = 0;
     uint8_t captured_total = 0;
-    uint16_t group_size;
     uint8_t own_liberties = 0;
 
     for (uint8_t d = 0; d < 4; d++) {
@@ -236,31 +270,34 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
         uint8_t bi = BF_BYTE(nb);
         uint8_t bm = BF_MASK(nb);
 
-        if ((opp[bi] & bm) && !(flood_visited[bi] & bm)) {
-            if (group_liberties(g, nb, opp, &group_size) == 0) {
-                for (uint16_t i = 0; i < group_size; i++) {
-                    uint16_t cap = flood_stack[i];
-                    BF_CLR(opp, cap);
-                    vram_set_tile(cap,
-                                  surface_tile(BOARD_COL(cap), BOARD_ROW(cap),
-                                               g->width, g->height));
+        if (opp[bi] & bm) {
+            if (!(flood_visited[bi] & bm)) {
+                uint16_t group_size;
+                if (group_liberties(g, nb, opp, &group_size) == 0) {
+                    for (uint16_t i = 0; i < group_size; i++) {
+                        uint16_t cap = flood_deque[i];
+                        BF_CLR(opp, cap);
+                        vram_set_tile(cap, surface_tile(BOARD_COL(cap),
+                                                        BOARD_ROW(cap),
+                                                        g->width, g->height));
+                    }
+                    if (captured_total == 0 && group_size == 1)
+                        captured_total = 1;
+                    else
+                        captured_total = 2;
+                    cap_dirs |= (1u << d);
+                    own_liberties++;
                 }
-                if (captured_total == 0 && group_size == 1)
-                    captured_total = 1;
-                else
-                    captured_total = 2;
-                cap_dirs |= (1u << d);
             }
-        }
-
-        if (!(own[bi] & bm) && (g->on_board[bi] & bm) && !(opp[bi] & bm))
+        } else if (!(own[bi] & bm) && (g->on_board[bi] & bm)) {
             own_liberties++;
+        }
     }
 
     /* Suicide: only possible when nothing was captured and the played
      * stone has no immediate liberty. */
     if (captured_total == 0 && own_liberties == 0 &&
-        group_liberties(g, coord, own, &group_size) == 0) {
+        !group_has_liberty(g, coord, own)) {
         own[ci] &= (uint8_t)~cm;
         return MOVE_SUICIDAL;
     }
@@ -297,11 +334,11 @@ undo_result_t game_undo(game_t *g) {
             uint16_t head = 0;
             uint16_t tail = 0;
 
-            flood_stack[tail++] = nb;
+            flood_deque[tail++] = nb;
             BF_SET(opp, nb);
 
             while (head < tail) {
-                uint16_t pos = flood_stack[head++];
+                uint16_t pos = flood_deque[head++];
                 vram_set_tile(pos, opp_tile);
                 for (uint8_t dd = 0; dd < 4; dd++) {
                     uint16_t adj = pos + dirs[dd];
@@ -311,7 +348,7 @@ undo_result_t game_undo(game_t *g) {
                         BF_GET(g->white_stones, adj))
                         continue;
                     BF_SET(opp, adj);
-                    flood_stack[tail++] = adj;
+                    flood_deque[tail++] = adj;
                 }
             }
         }
