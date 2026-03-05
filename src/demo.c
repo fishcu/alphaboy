@@ -59,7 +59,7 @@ static const uint8_t demo_moves[] = {
 static uint16_t demo_index;
 static uint8_t demo_timer;
 
-uint8_t demo_step(game_t *g, uint16_t *queue, uint8_t *visited) {
+uint8_t demo_step(game_t *g) {
     if (demo_index >= DEMO_MOVE_COUNT)
         return 0;
 
@@ -71,7 +71,7 @@ uint8_t demo_step(game_t *g, uint16_t *queue, uint8_t *visited) {
     uint8_t row = demo_moves[demo_index * 2 + 1];
     uint8_t color = game_color_to_play(g);
 
-    game_play_move(g, col, row, color, queue, visited);
+    game_play_move(g, BOARD_COORD(col, row), color);
     demo_index++;
     return 1;
 }

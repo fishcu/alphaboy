@@ -299,15 +299,14 @@ void main(void) {
         vsync();
 
 #ifdef DEMO_MODE
-        demo_step(g, flood_stack, flood_visited);
+        demo_step(g);
 #else
         input_poll(game_input);
 
         if (game_input->pressed & J_A) {
             uint8_t color = game_color_to_play(g);
-            move_legality_t result =
-                game_play_move(g, game_cursor->col, game_cursor->row, color,
-                               flood_stack, flood_visited);
+            uint16_t coord = BOARD_COORD(game_cursor->col, game_cursor->row);
+            move_legality_t result = game_play_move(g, coord, color);
 
             if (result == MOVE_LEGAL) {
                 cursor_invalidate(game_cursor);
@@ -331,7 +330,7 @@ void main(void) {
         }
 
         if (game_input->pressed & J_B) {
-            if (game_undo(g, flood_stack) == UNDO_OK) {
+            if (game_undo(g) == UNDO_OK) {
                 cursor_invalidate(game_cursor);
 #ifndef NDEBUG
                 EMU_printf("Undo → move_count=%u\n", (unsigned)g->move_count);

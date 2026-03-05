@@ -149,20 +149,16 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2);
 /* Play a pass for `color`.  Clears ko and records the pass in history. */
 void game_play_pass(game_t *g, uint8_t color);
 
-/* Play a move at (col, row) for `color`.  Updates the board state and
- * writes changed tiles to VRAM incrementally (via vram_set_tile).
- * `queue` and `visited` are scratch buffers for the flood-fill capture
- * check; they must be large enough (BOARD_POSITIONS entries / one
- * bitfield_t respectively).
+/* Play a stone at the packed coordinate `coord` for `color`.  Updates the
+ * board state and writes changed tiles to VRAM incrementally.
+ * Uses flood_stack / flood_visited from layout.h as scratch buffers.
  * Returns a move_legality_t indicating whether the move was played. */
-move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
-                               uint8_t color, uint16_t *queue,
-                               uint8_t *visited);
+move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color);
 
 /* Undo the last move, restoring captured stones and ko state.
- * `queue` is a scratch buffer (BOARD_POSITIONS entries).
+ * Uses flood_stack from layout.h as a scratch buffer.
  * Returns UNDO_OK on success, UNDO_NO_HISTORY if nothing to undo. */
-undo_result_t game_undo(game_t *g, uint16_t *queue);
+undo_result_t game_undo(game_t *g);
 
 /* Return the color to play next (BLACK or WHITE).
  * Derives from the last history entry; handles handicap correctly. */

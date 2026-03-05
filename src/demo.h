@@ -15,7 +15,7 @@
 
 /* Advance the demo by one move if enough frames have elapsed.
  * Returns 1 if a move was played, 0 otherwise. */
-uint8_t demo_step(game_t *g, uint16_t *queue, uint8_t *visited);
+uint8_t demo_step(game_t *g);
 
 #endif /* DEMO_MODE */
 #endif /* DEMO_H */

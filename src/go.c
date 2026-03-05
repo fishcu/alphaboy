@@ -17,32 +17,31 @@ static const int16_t dirs[4] = {DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT};
 /* ---- Flood fill for liberty detection ---- */
 
 /* Flood-fill the group containing `seed`, recording every stone in
- * `queue[0..*group_size-1]`.  Uses BFS to fully traverse the group
- * (no early-out) so that `visited` stays complete across calls.
+ * flood_stack[0..*group_size-1].  Uses BFS to fully traverse the group
+ * (no early-out) so that flood_visited stays complete across calls.
  * `stones` is the bitfield of the color to follow (black or white).
- * Precondition: seed must not already be in `visited`.
+ * Precondition: seed must not already be in flood_visited.
  * Returns the number of liberties (capped at UINT8_MAX); 0 = captured. */
 static uint8_t group_liberties(const game_t *g, uint16_t seed,
-                               const uint8_t *stones, uint8_t *visited,
-                               uint16_t *queue, uint16_t *group_size) {
-    assert(!BF_GET(visited, seed) && "seed already visited");
+                               const uint8_t *stones, uint16_t *group_size) {
+    assert(!BF_GET(flood_visited, seed) && "seed already visited");
 
     uint16_t head = 0;
     uint16_t tail = 0;
     uint8_t liberties = 0;
 
-    BF_SET(visited, seed);
-    queue[tail++] = seed;
+    BF_SET(flood_visited, seed);
+    flood_stack[tail++] = seed;
 
     while (head < tail) {
-        uint16_t pos = queue[head++];
+        uint16_t pos = flood_stack[head++];
         for (uint8_t d = 0; d < 4; d++) {
             uint16_t nb = pos + dirs[d];
-            if (BF_GET(visited, nb))
+            if (BF_GET(flood_visited, nb))
                 continue;
             if (BF_GET(stones, nb)) {
-                BF_SET(visited, nb);
-                queue[tail++] = nb;
+                BF_SET(flood_visited, nb);
+                flood_stack[tail++] = nb;
                 continue;
             }
             if (BF_GET(g->on_board, nb) && !BF_GET(g->black_stones, nb) &&
@@ -135,89 +134,54 @@ static void bf_clear(uint8_t *p) __naked {
 }
 // clang-format on
 
-move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
-                               uint8_t color, uint16_t *queue,
-                               uint8_t *visited) {
-    uint16_t coord = BOARD_COORD(col, row);
-
-    /* Ko check. */
-    if (coord == g->ko)
-        return MOVE_KO;
-
-    /* Must be an empty on-board intersection. */
-    if (!BF_GET(g->on_board, coord) || BF_GET(g->black_stones, coord) ||
-        BF_GET(g->white_stones, coord))
-        return MOVE_NON_EMPTY;
-
-    /* Place the stone in the bitfield (required for correct liberty
-     * counting).  The VRAM tile write is deferred until the move is
-     * confirmed legal, so suicidal moves never flash on screen. */
-    uint8_t *own = (color == BLACK) ? g->black_stones : g->white_stones;
-    uint8_t *opp = (color == BLACK) ? g->white_stones : g->black_stones;
-    BF_SET(own, coord);
-
-    /* Clear visited once for all flood fills this move. */
-    bf_clear(visited);
-
-    /* Single pass over the four neighbors: capture opponent groups,
-     * and classify each neighbor for ko / suicide detection. */
-    move_t move = MOVE_MAKE(coord, color);
-    uint16_t captured_total = 0;
-    uint16_t captured_at = COORD_PASS;
-    uint16_t group_size;
-    uint8_t is_single = 1;
-    uint8_t own_liberties = 0;
-
-    for (uint8_t d = 0; d < 4; d++) {
-        uint16_t nb = coord + dirs[d];
-
-        if (BF_GET(opp, nb) && !BF_GET(visited, nb)) {
-            if (group_liberties(g, nb, opp, visited, queue, &group_size) == 0) {
-                for (uint16_t i = 0; i < group_size; i++) {
-                    uint16_t cap = queue[i];
-                    BF_CLR(opp, cap);
-                    vram_set_tile(cap,
-                                  surface_tile(BOARD_COL(cap), BOARD_ROW(cap),
-                                               g->width, g->height));
-                }
-                captured_total += group_size;
-                captured_at = queue[0];
-                move |= (1u << (MOVE_CAP_SHIFT + d));
-            }
-        }
-
-        if (BF_GET(own, nb))
-            is_single = 0;
-        else if (BF_GET(g->on_board, nb) && !BF_GET(opp, nb))
-            own_liberties++;
-    }
-
-    /* Suicide: only possible when nothing was captured and the played
-     * stone has no immediate liberty.  Checked before touching g->ko
-     * so an illegal attempt leaves the ko state undisturbed. */
-    if (captured_total == 0 && own_liberties == 0 &&
-        group_liberties(g, coord, own, visited, queue, &group_size) == 0) {
-        BF_CLR(own, coord);
-        return MOVE_SUICIDAL;
-    }
-
+/* Commit a legal move: update ko state, un-mark previous last-played
+ * stone, write the new stone tile, and append to history.
+ * Split from game_play_move so each function has a manageable number
+ * of live locals for the SM83 register allocator. */
+static void game_commit_move(game_t *g, uint16_t coord, uint8_t color,
+                             uint8_t cap_dirs, uint8_t captured_total,
+                             uint8_t own_liberties) {
     /* Clear previous ko marker tile. */
     if (g->ko != COORD_PASS) {
         vram_set_tile(g->ko, surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
                                           g->width, g->height));
     }
 
-    /* Set new ko state and tile. */
-    if (captured_total == 1 && is_single && own_liberties == 1) {
-        g->ko = captured_at;
-        move |= (1u << MOVE_KO_BIT);
-        vram_set_tile(g->ko, ko_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
-                                     g->width, g->height));
+    /* Build the packed move. */
+    move_t move =
+        MOVE_MAKE(coord, color) | ((uint16_t)cap_dirs << MOVE_CAP_SHIFT);
+
+    /* Set new ko state: exactly one stone captured, the played stone
+     * is isolated (no own-color neighbors), and has exactly one
+     * liberty.  Both is_single and captured_at are reconstructed here
+     * rather than tracked in the hot loop. */
+    if (captured_total == 1 && own_liberties == 1) {
+        uint8_t *own = (color == BLACK) ? g->black_stones : g->white_stones;
+        uint8_t is_single = 1;
+        for (uint8_t d = 0; d < 4; d++) {
+            if (BF_GET(own, coord + dirs[d])) {
+                is_single = 0;
+                break;
+            }
+        }
+        if (is_single) {
+            for (uint8_t d = 0; d < 4; d++) {
+                if (cap_dirs & (1u << d)) {
+                    g->ko = coord + dirs[d];
+                    break;
+                }
+            }
+            move |= (1u << MOVE_KO_BIT);
+            vram_set_tile(g->ko, ko_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
+                                         g->width, g->height));
+        } else {
+            g->ko = COORD_PASS;
+        }
     } else {
         g->ko = COORD_PASS;
     }
 
-    /* Move is legal — un-mark previous last-played stone. */
+    /* Un-mark previous last-played stone. */
     if (g->move_count > g->history_base) {
         move_t prev = g->history[(g->move_count - 1) % HISTORY_MAX];
         uint16_t pc = MOVE_COORD(prev);
@@ -237,10 +201,75 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
     if (g->move_count >= g->history_base + HISTORY_MAX)
         g->history_base++;
     g->history[g->move_count++ % HISTORY_MAX] = move;
+}
+
+move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
+    /* Ko check. */
+    if (coord == g->ko)
+        return MOVE_KO;
+
+    /* Must be an empty on-board intersection. */
+    uint8_t ci = BF_BYTE(coord);
+    uint8_t cm = BF_MASK(coord);
+    if (!(g->on_board[ci] & cm) || (g->black_stones[ci] & cm) ||
+        (g->white_stones[ci] & cm))
+        return MOVE_NON_EMPTY;
+
+    bf_clear(flood_visited);
+
+    /* Place the stone in the bitfield (required for correct liberty
+     * counting).  The VRAM tile write is deferred until the move is
+     * confirmed legal, so suicidal moves never flash on screen. */
+    uint8_t *own = (color == BLACK) ? g->black_stones : g->white_stones;
+    uint8_t *opp = (color == BLACK) ? g->white_stones : g->black_stones;
+    own[ci] |= cm;
+
+    /* Single pass over the four neighbors: capture opponent groups
+     * and count own liberties for suicide / ko detection. */
+    uint8_t cap_dirs = 0;
+    uint8_t captured_total = 0;
+    uint16_t group_size;
+    uint8_t own_liberties = 0;
+
+    for (uint8_t d = 0; d < 4; d++) {
+        uint16_t nb = coord + dirs[d];
+        uint8_t bi = BF_BYTE(nb);
+        uint8_t bm = BF_MASK(nb);
+
+        if ((opp[bi] & bm) && !(flood_visited[bi] & bm)) {
+            if (group_liberties(g, nb, opp, &group_size) == 0) {
+                for (uint16_t i = 0; i < group_size; i++) {
+                    uint16_t cap = flood_stack[i];
+                    BF_CLR(opp, cap);
+                    vram_set_tile(cap,
+                                  surface_tile(BOARD_COL(cap), BOARD_ROW(cap),
+                                               g->width, g->height));
+                }
+                if (captured_total == 0 && group_size == 1)
+                    captured_total = 1;
+                else
+                    captured_total = 2;
+                cap_dirs |= (1u << d);
+            }
+        }
+
+        if (!(own[bi] & bm) && (g->on_board[bi] & bm) && !(opp[bi] & bm))
+            own_liberties++;
+    }
+
+    /* Suicide: only possible when nothing was captured and the played
+     * stone has no immediate liberty. */
+    if (captured_total == 0 && own_liberties == 0 &&
+        group_liberties(g, coord, own, &group_size) == 0) {
+        own[ci] &= (uint8_t)~cm;
+        return MOVE_SUICIDAL;
+    }
+
+    game_commit_move(g, coord, color, cap_dirs, captured_total, own_liberties);
     return MOVE_LEGAL;
 }
 
-undo_result_t game_undo(game_t *g, uint16_t *queue) {
+undo_result_t game_undo(game_t *g) {
     if (g->move_count <= g->history_base)
         return UNDO_NO_HISTORY;
     if (g->history_base > 0 && g->move_count <= g->history_base + 1)
@@ -268,11 +297,11 @@ undo_result_t game_undo(game_t *g, uint16_t *queue) {
             uint16_t head = 0;
             uint16_t tail = 0;
 
-            queue[tail++] = nb;
+            flood_stack[tail++] = nb;
             BF_SET(opp, nb);
 
             while (head < tail) {
-                uint16_t pos = queue[head++];
+                uint16_t pos = flood_stack[head++];
                 vram_set_tile(pos, opp_tile);
                 for (uint8_t dd = 0; dd < 4; dd++) {
                     uint16_t adj = pos + dirs[dd];
@@ -282,7 +311,7 @@ undo_result_t game_undo(game_t *g, uint16_t *queue) {
                         BF_GET(g->white_stones, adj))
                         continue;
                     BF_SET(opp, adj);
-                    queue[tail++] = adj;
+                    flood_stack[tail++] = adj;
                 }
             }
         }
