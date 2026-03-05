@@ -38,15 +38,15 @@ static uint8_t group_liberties(const game_t *g, uint16_t seed,
         uint16_t pos = queue[head++];
         for (uint8_t d = 0; d < 4; d++) {
             uint16_t nb = pos + dirs[d];
-            uint8_t bi = BF_BYTE(nb);
-            uint8_t bm = BF_MASK(nb);
-            if (visited[bi] & bm)
+            if (BF_GET(visited, nb))
                 continue;
-            if (stones[bi] & bm) {
-                visited[bi] |= bm;
+            if (BF_GET(stones, nb)) {
+                BF_SET(visited, nb);
                 queue[tail++] = nb;
-            } else if ((g->on_board[bi] & bm) && !(g->black_stones[bi] & bm) &&
-                       !(g->white_stones[bi] & bm)) {
+                continue;
+            }
+            if (BF_GET(g->on_board, nb) && !BF_GET(g->black_stones, nb) &&
+                !BF_GET(g->white_stones, nb)) {
                 if (liberties < UINT8_MAX)
                     liberties++;
             }
@@ -101,6 +101,40 @@ void game_play_pass(game_t *g, uint8_t color) {
     g->history[g->move_count++ % HISTORY_MAX] = MOVE_MAKE(COORD_PASS, color);
 }
 
+/* Clear the first 3 bytes of each 4-byte bitfield row (21 rows).
+ * Byte 3 of each row (columns 24-31) is never set by any board
+ * operation and stays zero, so we skip it.  3x unrolled loop:
+ * 7 iterations × 3 rows = 21 rows, ~196 cycles.
+ *
+ * __sdcccall(1): first 16-bit param arrives in DE. */
+// clang-format off
+static void bf_clear(uint8_t *p) __naked {
+    (void)p;
+    __asm
+        ld l, e
+        ld h, d
+        xor a
+        ld c, #7
+    00180$:
+        ld (hl+), a
+        ld (hl+), a
+        ld (hl+), a
+        inc hl
+        ld (hl+), a
+        ld (hl+), a
+        ld (hl+), a
+        inc hl
+        ld (hl+), a
+        ld (hl+), a
+        ld (hl+), a
+        inc hl
+        dec c
+        jr NZ, 00180$
+        ret
+    __endasm;
+}
+// clang-format on
+
 move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
                                uint8_t color, uint16_t *queue,
                                uint8_t *visited) {
@@ -125,7 +159,7 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
     own[ci] |= cm;
 
     /* Clear visited once for all flood fills this move. */
-    memset(visited, 0, BOARD_FIELD_BYTES);
+    bf_clear(visited);
 
     /* Single pass over the four neighbors: capture opponent groups,
      * and classify each neighbor for ko / suicide detection. */
