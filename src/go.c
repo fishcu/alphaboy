@@ -145,10 +145,8 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
         return MOVE_KO;
 
     /* Must be an empty on-board intersection. */
-    uint8_t ci = BF_BYTE(coord);
-    uint8_t cm = BF_MASK(coord);
-    if (!(g->on_board[ci] & cm) || (g->black_stones[ci] & cm) ||
-        (g->white_stones[ci] & cm))
+    if (!BF_GET(g->on_board, coord) || BF_GET(g->black_stones, coord) ||
+        BF_GET(g->white_stones, coord))
         return MOVE_NON_EMPTY;
 
     /* Place the stone in the bitfield (required for correct liberty
@@ -156,7 +154,7 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
      * confirmed legal, so suicidal moves never flash on screen. */
     uint8_t *own = (color == BLACK) ? g->black_stones : g->white_stones;
     uint8_t *opp = (color == BLACK) ? g->white_stones : g->black_stones;
-    own[ci] |= cm;
+    BF_SET(own, coord);
 
     /* Clear visited once for all flood fills this move. */
     bf_clear(visited);
@@ -172,10 +170,8 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
 
     for (uint8_t d = 0; d < 4; d++) {
         uint16_t nb = coord + dirs[d];
-        uint8_t bi = BF_BYTE(nb);
-        uint8_t bm = BF_MASK(nb);
 
-        if ((opp[bi] & bm) && !(visited[bi] & bm)) {
+        if (BF_GET(opp, nb) && !BF_GET(visited, nb)) {
             if (group_liberties(g, nb, opp, visited, queue, &group_size) == 0) {
                 for (uint16_t i = 0; i < group_size; i++) {
                     uint16_t cap = queue[i];
@@ -190,9 +186,9 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
             }
         }
 
-        if (own[bi] & bm)
+        if (BF_GET(own, nb))
             is_single = 0;
-        else if ((g->on_board[bi] & bm) && !(opp[bi] & bm))
+        else if (BF_GET(g->on_board, nb) && !BF_GET(opp, nb))
             own_liberties++;
     }
 
@@ -201,7 +197,7 @@ move_legality_t game_play_move(game_t *g, uint8_t col, uint8_t row,
      * so an illegal attempt leaves the ko state undisturbed. */
     if (captured_total == 0 && own_liberties == 0 &&
         group_liberties(g, coord, own, visited, queue, &group_size) == 0) {
-        own[ci] &= (uint8_t)~cm;
+        BF_CLR(own, coord);
         return MOVE_SUICIDAL;
     }
 
@@ -280,14 +276,12 @@ undo_result_t game_undo(game_t *g, uint16_t *queue) {
                 vram_set_tile(pos, opp_tile);
                 for (uint8_t dd = 0; dd < 4; dd++) {
                     uint16_t adj = pos + dirs[dd];
-                    uint8_t bi = BF_BYTE(adj);
-                    uint8_t bm = BF_MASK(adj);
-                    if (!(g->on_board[bi] & bm))
+                    if (!BF_GET(g->on_board, adj))
                         continue;
-                    if ((g->black_stones[bi] & bm) ||
-                        (g->white_stones[bi] & bm))
+                    if (BF_GET(g->black_stones, adj) ||
+                        BF_GET(g->white_stones, adj))
                         continue;
-                    opp[bi] |= bm;
+                    BF_SET(opp, adj);
                     queue[tail++] = adj;
                 }
             }
@@ -348,9 +342,7 @@ uint8_t game_can_play_approx(const game_t *g, uint8_t col, uint8_t row) {
     uint16_t coord = BOARD_COORD(col, row);
     if (coord == g->ko)
         return 0;
-    uint8_t bi = BF_BYTE(coord);
-    uint8_t bm = BF_MASK(coord);
-    if ((g->black_stones[bi] & bm) || (g->white_stones[bi] & bm))
+    if (BF_GET(g->black_stones, coord) || BF_GET(g->white_stones, coord))
         return 0;
     return 1;
 }
