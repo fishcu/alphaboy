@@ -63,13 +63,13 @@ const uint8_t pow2[8] = {1, 2, 4, 8, 16, 32, 64, 128};
 /* Flood-fill the group containing `seed`, recording every stone in
  * flood_deque[0..tail-1].  Uses BFS to fully traverse the group
  * (no early-out) so that flood_visited stays complete across calls.
- * `stones` is the bitfield of the color to follow (black or white).
+ * `stone_color` is the color to follow (COLOR_BLACK or COLOR_WHITE).
  * Precondition: seed must not already be in flood_visited.
  * Returns the number of liberties (capped at UINT8_MAX); 0 = captured.
  * After return, flood_deque[0..group_size-1] holds the group coords;
  * read the returned tail via the `group_size` output parameter. */
 static uint8_t group_liberties(const game_t *g, uint16_t seed,
-                               const uint8_t *stones, uint16_t *group_size) {
+                               uint8_t stone_color, uint16_t *group_size) {
     assert(!BF_GET(flood_visited, seed) && "seed already visited");
 
     uint16_t head = 0;
@@ -84,12 +84,11 @@ static uint8_t group_liberties(const game_t *g, uint16_t seed,
         uint16_t nb;
         FOR_EACH_NEIGHBOR(pos, nb, {
             if (!BF_GET(flood_visited, nb)) {
-                if (BF_GET(stones, nb)) {
+                uint8_t cell = g->board[nb];
+                if (cell == stone_color) {
                     BF_SET(flood_visited, nb);
                     flood_deque[tail++] = nb;
-                } else if (BF_GET(g->on_board, nb) &&
-                           !BF_GET(g->black_stones, nb) &&
-                           !BF_GET(g->white_stones, nb)) {
+                } else if (cell == COLOR_EMPTY) {
                     if (liberties < UINT8_MAX)
                         liberties++;
                 }
@@ -106,7 +105,7 @@ static uint8_t group_liberties(const game_t *g, uint16_t seed,
  * Does not record group size.  May leave flood_visited incomplete,
  * so this must be the last flood operation for the current move. */
 static uint8_t group_has_liberty(const game_t *g, uint16_t seed,
-                                 const uint8_t *stones) {
+                                 uint8_t stone_color) {
     uint16_t head = 0;
     uint16_t tail = 0;
 
@@ -118,12 +117,11 @@ static uint8_t group_has_liberty(const game_t *g, uint16_t seed,
         uint16_t nb;
         FOR_EACH_NEIGHBOR(pos, nb, {
             if (!BF_GET(flood_visited, nb)) {
-                if (BF_GET(stones, nb)) {
+                uint8_t cell = g->board[nb];
+                if (cell == stone_color) {
                     BF_SET(flood_visited, nb);
                     flood_deque[tail++] = nb;
-                } else if (BF_GET(g->on_board, nb) &&
-                           !BF_GET(g->black_stones, nb) &&
-                           !BF_GET(g->white_stones, nb)) {
+                } else if (cell == COLOR_EMPTY) {
                     return 1;
                 }
             }
@@ -146,18 +144,12 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
     g->move_count = 0;
     g->history_base = 0;
 
-    memset(g->on_board, 0, BOARD_FIELD_BYTES);
-    memset(g->black_stones, 0, BOARD_FIELD_BYTES);
-    memset(g->white_stones, 0, BOARD_FIELD_BYTES);
+    memset(g->board, COLOR_OFF_BOARD, BOARD_CELLS);
 
-    /* Mark every coordinate inside the board area.
-     * BOARD_COORD(0, 0) is a compile-time constant (no runtime multiply).
-     * We stride by DIR_DOWN per row (one add) and increment per column,
-     * avoiding any multiplication in the loop. */
     uint16_t pos = BOARD_COORD(0, 0);
     for (uint8_t row = 0; row < height; row++) {
         for (uint8_t col = 0; col < width; col++) {
-            BF_SET(g->on_board, pos);
+            g->board[pos] = COLOR_EMPTY;
             pos++;
         }
         pos += DIR_DOWN - width;
@@ -166,7 +158,7 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
 
 /* ---- Play a move ---- */
 
-void game_play_pass(game_t *g, uint8_t color) {
+void game_play_pass(game_t *g, color_t color) {
     if (g->ko != COORD_PASS) {
         vram_set_tile(g->ko, surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
                                           g->width, g->height));
@@ -211,21 +203,19 @@ static void bf_clear(uint8_t *p) __naked {
 }
 // clang-format on
 
-move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
+move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
     if (coord == g->ko)
         return MOVE_KO;
 
-    uint8_t ci = BF_BYTE(coord);
-    uint8_t cm = BF_MASK(coord);
-    assert((g->on_board[ci] & cm) && "coord must be on board");
-    if ((g->black_stones[ci] & cm) || (g->white_stones[ci] & cm))
+    assert(g->board[coord] != COLOR_OFF_BOARD && "coord must be on board");
+    if (g->board[coord] != COLOR_EMPTY)
         return MOVE_NON_EMPTY;
 
     bf_clear(flood_visited);
 
-    uint8_t *own = (color == BLACK) ? g->black_stones : g->white_stones;
-    uint8_t *opp = (color == BLACK) ? g->white_stones : g->black_stones;
-    own[ci] |= cm;
+    color_t own_color = color;
+    color_t opp_color = COLOR_OPPOSITE(color);
+    g->board[coord] = own_color;
 
     uint8_t move_hi = (uint8_t)((coord >> 8) | (color << (MOVE_COLOR_BIT - 8)));
     uint8_t captured_total = 0;
@@ -234,15 +224,18 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
     uint16_t nb;
     uint8_t dir_bit;
     FOR_EACH_NEIGHBOR_DIR(coord, nb, dir_bit, {
-        uint8_t bi = BF_BYTE(nb);
-        uint8_t bm = BF_MASK(nb);
-        if (opp[bi] & bm) {
-            if (!(flood_visited[bi] & bm)) {
+        uint8_t cell = g->board[nb];
+        if (cell == opp_color) {
+            if (!BF_GET(flood_visited, nb) &&
+                g->board[nb + DIR_UP] != COLOR_EMPTY &&
+                g->board[nb + DIR_DOWN] != COLOR_EMPTY &&
+                g->board[nb + DIR_LEFT] != COLOR_EMPTY &&
+                g->board[nb + DIR_RIGHT] != COLOR_EMPTY) {
                 uint16_t group_size;
-                if (group_liberties(g, nb, opp, &group_size) == 0) {
+                if (group_liberties(g, nb, opp_color, &group_size) == 0) {
                     for (uint16_t i = 0; i < group_size; i++) {
                         uint16_t cap = flood_deque[i];
-                        BF_CLR(opp, cap);
+                        g->board[cap] = COLOR_EMPTY;
                         vram_set_tile(cap, surface_tile(BOARD_COL(cap),
                                                         BOARD_ROW(cap),
                                                         g->width, g->height));
@@ -255,14 +248,14 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
                     own_liberties++;
                 }
             }
-        } else if (!(own[bi] & bm) && (g->on_board[bi] & bm)) {
+        } else if (cell == COLOR_EMPTY) {
             own_liberties++;
         }
     });
 
     if (captured_total == 0 && own_liberties == 0 &&
-        !group_has_liberty(g, coord, own)) {
-        own[ci] &= (uint8_t)~cm;
+        !group_has_liberty(g, coord, own_color)) {
+        g->board[coord] = COLOR_EMPTY;
         return MOVE_SUICIDAL;
     }
 
@@ -280,7 +273,7 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
     if (captured_total == 1 && own_liberties == 1) {
         uint16_t ko = COORD_PASS;
         FOR_EACH_NEIGHBOR_DIR(coord, nb, dir_bit, {
-            if (BF_GET(own, nb))
+            if (g->board[nb] == own_color)
                 goto ko_done;
             if (move_hi & (dir_bit << (MOVE_CAP_SHIFT - 8)))
                 ko = nb;
@@ -297,17 +290,15 @@ ko_done:;
         move_t prev = g->history[(g->move_count - 1) % HISTORY_MAX];
         uint16_t pc = MOVE_COORD(prev);
         if (pc != COORD_PASS) {
-            uint8_t prev_color = MOVE_COLOR(prev);
-            uint8_t *prev_field =
-                (prev_color == BLACK) ? g->black_stones : g->white_stones;
-            if (BF_GET(prev_field, pc)) {
-                vram_set_tile(pc, (prev_color == BLACK) ? TILE_STONE_B
-                                                        : TILE_STONE_W);
-            }
+            uint8_t prev_color = g->board[pc];
+            if (prev_color == COLOR_BLACK)
+                vram_set_tile(pc, TILE_STONE_B);
+            else if (prev_color == COLOR_WHITE)
+                vram_set_tile(pc, TILE_STONE_W);
         }
     }
 
-    vram_set_tile(coord, (color == BLACK) ? TILE_LAST_B : TILE_LAST_W);
+    vram_set_tile(coord, (color == COLOR_BLACK) ? TILE_LAST_B : TILE_LAST_W);
     if (g->move_count >= g->history_base + HISTORY_MAX)
         g->history_base++;
     /* Reassemble the full move_t from the 8-bit high byte (flags + coord
@@ -328,10 +319,9 @@ undo_result_t game_undo(game_t *g) {
     uint16_t coord = MOVE_COORD(move);
 
     if (coord != COORD_PASS) {
-        uint8_t color = MOVE_COLOR(move);
-        uint8_t *own = (color == BLACK) ? g->black_stones : g->white_stones;
-        uint8_t *opp = (color == BLACK) ? g->white_stones : g->black_stones;
-        uint8_t opp_tile = (color == BLACK) ? TILE_STONE_W : TILE_STONE_B;
+        color_t color = MOVE_COLOR(move);
+        color_t opp_color = COLOR_OPPOSITE(color);
+        uint8_t opp_tile = (color == COLOR_BLACK) ? TILE_STONE_W : TILE_STONE_B;
 
         /* Restore captured groups by flood-filling through empties.
          * Each captured group's empty region is fully enclosed by the
@@ -345,17 +335,15 @@ undo_result_t game_undo(game_t *g) {
                 uint16_t tail = 0;
 
                 flood_deque[tail++] = nb;
-                BF_SET(opp, nb);
+                g->board[nb] = opp_color;
 
                 while (head < tail) {
                     uint16_t pos = flood_deque[head++];
                     vram_set_tile(pos, opp_tile);
                     uint16_t adj;
                     FOR_EACH_NEIGHBOR(pos, adj, {
-                        if (BF_GET(g->on_board, adj) &&
-                            !BF_GET(g->black_stones, adj) &&
-                            !BF_GET(g->white_stones, adj)) {
-                            BF_SET(opp, adj);
+                        if (g->board[adj] == COLOR_EMPTY) {
+                            g->board[adj] = opp_color;
                             flood_deque[tail++] = adj;
                         }
                     });
@@ -364,7 +352,7 @@ undo_result_t game_undo(game_t *g) {
         });
 
         /* Remove the played stone. */
-        BF_CLR(own, coord);
+        g->board[coord] = COLOR_EMPTY;
         vram_set_tile(coord, surface_tile(BOARD_COL(coord), BOARD_ROW(coord),
                                           g->width, g->height));
     }
@@ -399,17 +387,17 @@ undo_result_t game_undo(game_t *g) {
         move_t last = g->history[(g->move_count - 1) % HISTORY_MAX];
         uint16_t lc = MOVE_COORD(last);
         if (lc != COORD_PASS) {
-            vram_set_tile(lc, (MOVE_COLOR(last) == BLACK) ? TILE_LAST_B
-                                                          : TILE_LAST_W);
+            vram_set_tile(lc, (MOVE_COLOR(last) == COLOR_BLACK) ? TILE_LAST_B
+                                                                : TILE_LAST_W);
         }
     }
 
     return UNDO_OK;
 }
 
-uint8_t game_color_to_play(const game_t *g) {
+color_t game_color_to_play(const game_t *g) {
     if (g->move_count == 0)
-        return BLACK;
+        return COLOR_BLACK;
     return COLOR_OPPOSITE(
         MOVE_COLOR(g->history[(g->move_count - 1) % HISTORY_MAX]));
 }
@@ -418,7 +406,7 @@ uint8_t game_can_play_approx(const game_t *g, uint8_t col, uint8_t row) {
     uint16_t coord = BOARD_COORD(col, row);
     if (coord == g->ko)
         return 0;
-    if (BF_GET(g->black_stones, coord) || BF_GET(g->white_stones, coord))
+    if (g->board[coord] != COLOR_EMPTY)
         return 0;
     return 1;
 }
@@ -439,12 +427,17 @@ void game_debug_print(const game_t *g) {
         for (uint8_t col = 0; col < w; col++) {
             if (col > 0)
                 row_str[idx++] = ' ';
-            if (BF_GET(g->black_stones, p))
+            switch (g->board[p]) {
+            case COLOR_BLACK:
                 row_str[idx++] = 'X';
-            else if (BF_GET(g->white_stones, p))
+                break;
+            case COLOR_WHITE:
                 row_str[idx++] = 'O';
-            else
+                break;
+            default:
                 row_str[idx++] = '.';
+                break;
+            }
             p++;
         }
         row_str[idx] = '\0';

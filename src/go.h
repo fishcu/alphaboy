@@ -26,15 +26,26 @@
 #define COORD_SHIFT 5
 #define COORD_COL_MASK ((1u << COORD_SHIFT) - 1) /* 0x1F */
 
-/* Bitfield storage dimensions (4 bytes per row, matching stride 32). */
+/* Bitfield storage dimensions (4 bytes per row, matching stride 32).
+ * Still used for flood_visited. */
 #define BF_ROW_BYTES (1 << (COORD_SHIFT - 3)) /* 4 */
 #define BF_NUM_ROWS (BOARD_MAX_SIZE + 2 * BOARD_MARGIN)
 #define BOARD_FIELD_BYTES (BF_NUM_ROWS * BF_ROW_BYTES) /* 84 */
 
-/* --- Colors --- */
+/* Board array: one uint8_t per coordinate in the padded grid. */
+#define BOARD_CELLS (BF_NUM_ROWS << COORD_SHIFT) /* 672 */
 
-#define BLACK 0
-#define WHITE 1
+/* --- Cell state (one uint8_t per board position) ---
+ * COLOR_BLACK and COLOR_WHITE double as both color constants and cell values.
+ */
+
+typedef enum {
+    COLOR_BLACK = 0,
+    COLOR_WHITE = 1,
+    COLOR_EMPTY = 2,
+    COLOR_OFF_BOARD = 3
+} color_t;
+
 #define COLOR_OPPOSITE(c) ((c) ^ 1)
 
 /* --- Move legality --- */
@@ -61,7 +72,7 @@ typedef uint8_t undo_result_t;
 #define COORD_PASS 0x03FFu
 
 /* Packed move (16 bits):
- *   bit  15       color (BLACK=0, WHITE=1)
+ *   bit  15       color (0=COLOR_BLACK, 1=COLOR_WHITE)
  *   bit  14       ko flag (this move caused ko)
  *   bits 13-10    capture direction flags (UP, DOWN, LEFT, RIGHT)
  *   bits 9-0      board coordinate or COORD_PASS */
@@ -125,9 +136,7 @@ typedef struct game {
     uint16_t ko;                 /* active ko position, COORD_PASS if none */
     uint16_t move_count;         /* number of moves played so far          */
     uint16_t history_base;       /* oldest undoable move_count value       */
-    bitfield_t on_board;         /* 1 = coordinate lies inside the board   */
-    bitfield_t black_stones;     /* 1 = black stone present                */
-    bitfield_t white_stones;     /* 1 = white stone present                */
+    uint8_t board[BOARD_CELLS];  /* cell state per padded coordinate       */
     move_t history[HISTORY_MAX]; /* ring buffer of packed moves            */
 } game_t;
 
@@ -147,22 +156,22 @@ typedef struct game {
 void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2);
 
 /* Play a pass for `color`.  Clears ko and records the pass in history. */
-void game_play_pass(game_t *g, uint8_t color);
+void game_play_pass(game_t *g, color_t color);
 
 /* Play a stone at the packed coordinate `coord` for `color`.  Updates the
  * board state and writes changed tiles to VRAM incrementally.
  * Uses flood_stack / flood_visited from layout.h as scratch buffers.
  * Returns a move_legality_t indicating whether the move was played. */
-move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color);
+move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color);
 
 /* Undo the last move, restoring captured stones and ko state.
  * Uses flood_stack from layout.h as a scratch buffer.
  * Returns UNDO_OK on success, UNDO_NO_HISTORY if nothing to undo. */
 undo_result_t game_undo(game_t *g);
 
-/* Return the color to play next (BLACK or WHITE).
+/* Return the color to play next (COLOR_BLACK or COLOR_WHITE).
  * Derives from the last history entry; handles handicap correctly. */
-uint8_t game_color_to_play(const game_t *g);
+color_t game_color_to_play(const game_t *g);
 
 /* Cheap legality approximation: 1 if (col, row) is empty and not ko.
  * Does not check suicide — intended for ghost stone display gating. */

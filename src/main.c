@@ -120,12 +120,17 @@ static void board_redraw(const game_t *g) {
         uint16_t p = pos;
         for (uint8_t col = 0; col < w; col++) {
             uint8_t tile;
-            if (BF_GET(g->black_stones, p))
+            switch (g->board[p]) {
+            case COLOR_BLACK:
                 tile = TILE_STONE_B;
-            else if (BF_GET(g->white_stones, p))
+                break;
+            case COLOR_WHITE:
                 tile = TILE_STONE_W;
-            else
+                break;
+            default:
                 tile = surface_tile(col, row, w, h);
+                break;
+            }
             vram_set_tile(p, tile);
             p++;
         }
@@ -138,8 +143,8 @@ static void board_redraw(const game_t *g) {
         move_t last = g->history[(g->move_count - 1) % HISTORY_MAX];
         uint16_t lc = MOVE_COORD(last);
         if (lc != COORD_PASS) {
-            vram_set_tile(lc, (MOVE_COLOR(last) == BLACK) ? TILE_LAST_B
-                                                          : TILE_LAST_W);
+            vram_set_tile(lc, (MOVE_COLOR(last) == COLOR_BLACK) ? TILE_LAST_B
+                                                                : TILE_LAST_W);
         }
     }
 }
@@ -304,7 +309,7 @@ void main(void) {
         input_poll(game_input);
 
         if (game_input->pressed & J_A) {
-            uint8_t color = game_color_to_play(g);
+            color_t color = game_color_to_play(g);
             uint16_t coord = BOARD_COORD(game_cursor->col, game_cursor->row);
             move_legality_t result = game_play_move(g, coord, color);
 
@@ -313,7 +318,7 @@ void main(void) {
 #ifndef NDEBUG
                 EMU_printf("Move %u: %s at (%hu,%hu)\n",
                            (unsigned)g->move_count,
-                           (color == BLACK) ? "B" : "W", game_cursor->col,
+                           (color == COLOR_BLACK) ? "B" : "W", game_cursor->col,
                            game_cursor->row);
                 game_debug_print(g);
 #endif
@@ -323,7 +328,7 @@ void main(void) {
                 static const char *const reasons[] = {"legal", "non-empty",
                                                       "suicidal", "ko"};
                 EMU_printf("Illegal (%s): %s at (%hu,%hu)\n", reasons[result],
-                           (color == BLACK) ? "B" : "W", game_cursor->col,
+                           (color == COLOR_BLACK) ? "B" : "W", game_cursor->col,
                            game_cursor->row);
             }
 #endif

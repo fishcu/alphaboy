@@ -24,8 +24,8 @@ static uint16_t target_y(uint8_t row, uint8_t board_h) {
 static void recompute_ghost(cursor_t *c, const game_t *g) {
     c->surface_cache = surface_tile(c->col, c->row, g->width, g->height);
     if (game_can_play_approx(g, c->col, c->row))
-        c->ghost_tile =
-            (game_color_to_play(g) == BLACK) ? TILE_STONE_B : TILE_STONE_W;
+        c->ghost_tile = (game_color_to_play(g) == COLOR_BLACK) ? TILE_STONE_B
+                                                               : TILE_STONE_W;
     else
         c->ghost_tile = 0;
 }
