@@ -227,11 +227,9 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
     uint8_t *opp = (color == BLACK) ? g->white_stones : g->black_stones;
     own[ci] |= cm;
 
-    move_t move = MOVE_MAKE(coord, color);
+    uint8_t move_hi = (uint8_t)((coord >> 8) | (color << (MOVE_COLOR_BIT - 8)));
     uint8_t captured_total = 0;
     uint8_t own_liberties = 0;
-    uint8_t is_single = 1;
-    uint16_t ko = COORD_PASS;
 
     uint16_t nb;
     uint8_t dir_bit;
@@ -249,19 +247,15 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
                                                         BOARD_ROW(cap),
                                                         g->width, g->height));
                     }
-                    move |= (uint16_t)dir_bit << MOVE_CAP_SHIFT;
-                    if (captured_total == 0 && group_size == 1) {
+                    move_hi |= dir_bit << (MOVE_CAP_SHIFT - 8);
+                    if (captured_total == 0 && group_size == 1)
                         captured_total = 1;
-                        ko = nb;
-                    } else {
+                    else
                         captured_total = 2;
-                    }
                     own_liberties++;
                 }
             }
-        } else if (own[bi] & bm) {
-            is_single = 0;
-        } else if (g->on_board[bi] & bm) {
+        } else if (!(own[bi] & bm) && (g->on_board[bi] & bm)) {
             own_liberties++;
         }
     });
@@ -278,14 +272,25 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
                                           g->width, g->height));
     }
 
-    if (captured_total == 1 && own_liberties == 1 && is_single) {
+    /* Ko detection: exactly one single-stone group captured and the
+     * played stone has exactly one liberty and no own-color neighbors.
+     * Reconstruct the ko position here rather than tracking it in the
+     * hot loop.  goto early-outs when an own-color neighbor is found. */
+    g->ko = COORD_PASS;
+    if (captured_total == 1 && own_liberties == 1) {
+        uint16_t ko = COORD_PASS;
+        FOR_EACH_NEIGHBOR_DIR(coord, nb, dir_bit, {
+            if (BF_GET(own, nb))
+                goto ko_done;
+            if (move_hi & (dir_bit << (MOVE_CAP_SHIFT - 8)))
+                ko = nb;
+        });
         g->ko = ko;
-        move |= (1u << MOVE_KO_BIT);
+        move_hi |= (1 << (MOVE_KO_BIT - 8));
         vram_set_tile(g->ko, ko_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
                                      g->width, g->height));
-    } else {
-        g->ko = COORD_PASS;
     }
+ko_done:;
 
     /* Un-mark previous last-played stone. */
     if (g->move_count > g->history_base) {
@@ -305,7 +310,10 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
     vram_set_tile(coord, (color == BLACK) ? TILE_LAST_B : TILE_LAST_W);
     if (g->move_count >= g->history_base + HISTORY_MAX)
         g->history_base++;
-    g->history[g->move_count++ % HISTORY_MAX] = move;
+    /* Reassemble the full move_t from the 8-bit high byte (flags + coord
+     * upper bits) and the low byte of the original coordinate. */
+    g->history[g->move_count++ % HISTORY_MAX] =
+        ((move_t)move_hi << 8) | (uint8_t)coord;
     return MOVE_LEGAL;
 }
 
