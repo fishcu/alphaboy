@@ -11,8 +11,52 @@
 /* Powers-of-two lookup table (avoids variable shifts on SM83). */
 const uint8_t pow2[8] = {1, 2, 4, 8, 16, 32, 64, 128};
 
-/* Four cardinal neighbor offsets in the packed coordinate space. */
-static const int16_t dirs[4] = {DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT};
+/* Unrolled four-neighbor iteration.  Each direction offset and bit
+ * mask is a compile-time immediate — no loop counter, no table lookup.
+ * Bodies must not use break/continue (restructure to if/else). */
+#define FOR_EACH_NEIGHBOR(center, nb, body)                                    \
+    do {                                                                       \
+        {                                                                      \
+            nb = (center) + DIR_UP;                                            \
+            body                                                               \
+        }                                                                      \
+        {                                                                      \
+            nb = (center) + DIR_DOWN;                                          \
+            body                                                               \
+        }                                                                      \
+        {                                                                      \
+            nb = (center) + DIR_LEFT;                                          \
+            body                                                               \
+        }                                                                      \
+        {                                                                      \
+            nb = (center) + DIR_RIGHT;                                         \
+            body                                                               \
+        }                                                                      \
+    } while (0)
+
+#define FOR_EACH_NEIGHBOR_DIR(center, nb, dir_bit, body)                       \
+    do {                                                                       \
+        {                                                                      \
+            nb = (center) + DIR_UP;                                            \
+            dir_bit = 1;                                                       \
+            body                                                               \
+        }                                                                      \
+        {                                                                      \
+            nb = (center) + DIR_DOWN;                                          \
+            dir_bit = 2;                                                       \
+            body                                                               \
+        }                                                                      \
+        {                                                                      \
+            nb = (center) + DIR_LEFT;                                          \
+            dir_bit = 4;                                                       \
+            body                                                               \
+        }                                                                      \
+        {                                                                      \
+            nb = (center) + DIR_RIGHT;                                         \
+            dir_bit = 8;                                                       \
+            body                                                               \
+        }                                                                      \
+    } while (0)
 
 /* ---- Flood fill for liberty detection ---- */
 
@@ -37,21 +81,20 @@ static uint8_t group_liberties(const game_t *g, uint16_t seed,
 
     while (head < tail) {
         uint16_t pos = flood_deque[head++];
-        for (uint8_t d = 4; d--;) {
-            uint16_t nb = pos + dirs[d];
-            if (BF_GET(flood_visited, nb))
-                continue;
-            if (BF_GET(stones, nb)) {
-                BF_SET(flood_visited, nb);
-                flood_deque[tail++] = nb;
-                continue;
+        uint16_t nb;
+        FOR_EACH_NEIGHBOR(pos, nb, {
+            if (!BF_GET(flood_visited, nb)) {
+                if (BF_GET(stones, nb)) {
+                    BF_SET(flood_visited, nb);
+                    flood_deque[tail++] = nb;
+                } else if (BF_GET(g->on_board, nb) &&
+                           !BF_GET(g->black_stones, nb) &&
+                           !BF_GET(g->white_stones, nb)) {
+                    if (liberties < UINT8_MAX)
+                        liberties++;
+                }
             }
-            if (BF_GET(g->on_board, nb) && !BF_GET(g->black_stones, nb) &&
-                !BF_GET(g->white_stones, nb)) {
-                if (liberties < UINT8_MAX)
-                    liberties++;
-            }
-        }
+        });
     }
 
     *group_size = tail;
@@ -72,20 +115,19 @@ static uint8_t group_has_liberty(const game_t *g, uint16_t seed,
 
     while (head < tail) {
         uint16_t pos = flood_deque[head++];
-        for (uint8_t d = 4; d--;) {
-            uint16_t nb = pos + dirs[d];
-            if (BF_GET(flood_visited, nb))
-                continue;
-            if (BF_GET(stones, nb)) {
-                BF_SET(flood_visited, nb);
-                flood_deque[tail++] = nb;
-                continue;
+        uint16_t nb;
+        FOR_EACH_NEIGHBOR(pos, nb, {
+            if (!BF_GET(flood_visited, nb)) {
+                if (BF_GET(stones, nb)) {
+                    BF_SET(flood_visited, nb);
+                    flood_deque[tail++] = nb;
+                } else if (BF_GET(g->on_board, nb) &&
+                           !BF_GET(g->black_stones, nb) &&
+                           !BF_GET(g->white_stones, nb)) {
+                    return 1;
+                }
             }
-            if (BF_GET(g->on_board, nb) && !BF_GET(g->black_stones, nb) &&
-                !BF_GET(g->white_stones, nb)) {
-                return 1;
-            }
-        }
+        });
     }
 
     return 0;
@@ -191,11 +233,11 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
     uint8_t is_single = 1;
     uint16_t ko = COORD_PASS;
 
-    for (uint8_t d = 4; d--;) {
-        uint16_t nb = coord + dirs[d];
+    uint16_t nb;
+    uint8_t dir_bit;
+    FOR_EACH_NEIGHBOR_DIR(coord, nb, dir_bit, {
         uint8_t bi = BF_BYTE(nb);
         uint8_t bm = BF_MASK(nb);
-
         if (opp[bi] & bm) {
             if (!(flood_visited[bi] & bm)) {
                 uint16_t group_size;
@@ -207,7 +249,7 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
                                                         BOARD_ROW(cap),
                                                         g->width, g->height));
                     }
-                    move |= (uint16_t)pow2[d] << MOVE_CAP_SHIFT;
+                    move |= (uint16_t)dir_bit << MOVE_CAP_SHIFT;
                     if (captured_total == 0 && group_size == 1) {
                         captured_total = 1;
                         ko = nb;
@@ -222,7 +264,7 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, uint8_t color) {
         } else if (g->on_board[bi] & bm) {
             own_liberties++;
         }
-    }
+    });
 
     if (captured_total == 0 && own_liberties == 0 &&
         !group_has_liberty(g, coord, own)) {
@@ -287,32 +329,31 @@ undo_result_t game_undo(game_t *g) {
          * Each captured group's empty region is fully enclosed by the
          * capturing player's stones and the board edge, so a BFS from
          * the capture-direction neighbor recovers exactly the group. */
-        for (uint8_t d = 4; d--;) {
-            if (!(move & ((uint16_t)pow2[d] << MOVE_CAP_SHIFT)))
-                continue;
+        uint16_t nb;
+        uint8_t dir_bit;
+        FOR_EACH_NEIGHBOR_DIR(coord, nb, dir_bit, {
+            if (move & ((uint16_t)dir_bit << MOVE_CAP_SHIFT)) {
+                uint16_t head = 0;
+                uint16_t tail = 0;
 
-            uint16_t nb = coord + dirs[d];
-            uint16_t head = 0;
-            uint16_t tail = 0;
+                flood_deque[tail++] = nb;
+                BF_SET(opp, nb);
 
-            flood_deque[tail++] = nb;
-            BF_SET(opp, nb);
-
-            while (head < tail) {
-                uint16_t pos = flood_deque[head++];
-                vram_set_tile(pos, opp_tile);
-                for (uint8_t dd = 4; dd--;) {
-                    uint16_t adj = pos + dirs[dd];
-                    if (!BF_GET(g->on_board, adj))
-                        continue;
-                    if (BF_GET(g->black_stones, adj) ||
-                        BF_GET(g->white_stones, adj))
-                        continue;
-                    BF_SET(opp, adj);
-                    flood_deque[tail++] = adj;
+                while (head < tail) {
+                    uint16_t pos = flood_deque[head++];
+                    vram_set_tile(pos, opp_tile);
+                    uint16_t adj;
+                    FOR_EACH_NEIGHBOR(pos, adj, {
+                        if (BF_GET(g->on_board, adj) &&
+                            !BF_GET(g->black_stones, adj) &&
+                            !BF_GET(g->white_stones, adj)) {
+                            BF_SET(opp, adj);
+                            flood_deque[tail++] = adj;
+                        }
+                    });
                 }
             }
-        }
+        });
 
         /* Remove the played stone. */
         BF_CLR(own, coord);
@@ -328,12 +369,12 @@ undo_result_t game_undo(game_t *g) {
         move_t prev = g->history[(g->move_count - 1) % HISTORY_MAX];
         if (prev & (1u << MOVE_KO_BIT)) {
             uint16_t prev_coord = MOVE_COORD(prev);
-            for (uint8_t d = 4; d--;) {
-                if (prev & ((uint16_t)pow2[d] << MOVE_CAP_SHIFT)) {
-                    g->ko = prev_coord + dirs[d];
-                    break;
-                }
-            }
+            uint16_t nb;
+            uint8_t dir_bit;
+            FOR_EACH_NEIGHBOR_DIR(prev_coord, nb, dir_bit, {
+                if (prev & ((uint16_t)dir_bit << MOVE_CAP_SHIFT))
+                    g->ko = nb;
+            });
         } else {
             g->ko = COORD_PASS;
         }
