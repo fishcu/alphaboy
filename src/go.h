@@ -93,11 +93,11 @@ typedef uint16_t move_t;
  * each row is 4 bytes, and bits within a row map naturally. */
 #define BF_BYTE(pc) ((pc) >> 3)
 
-/* Bit-field mask lookup table (avoids variable shifts on SM83). */
-extern const uint8_t bf_masks[8];
+/* Powers-of-two lookup table (avoids variable shifts on SM83). */
+extern const uint8_t pow2[8];
 
 /* Bit mask for packed coordinate `pc` within its byte. */
-#define BF_MASK(pc) (bf_masks[(pc)&7])
+#define BF_MASK(pc) (pow2[(pc)&7])
 
 /* Test whether the bit for packed coord `pc` is set in field `f`. */
 #define BF_GET(f, pc) ((f)[BF_BYTE(pc)] & BF_MASK(pc))
