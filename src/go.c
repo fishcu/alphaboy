@@ -219,7 +219,6 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
 
     uint8_t move_hi = (uint8_t)((coord >> 8) | (color << (MOVE_COLOR_BIT - 8)));
     uint8_t captured_total = 0;
-    uint8_t own_liberties = 0;
 
     uint16_t nb;
     uint8_t dir_bit;
@@ -245,15 +244,15 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
                         captured_total = 1;
                     else
                         captured_total = 2;
-                    own_liberties++;
                 }
             }
-        } else if (cell == COLOR_EMPTY) {
-            own_liberties++;
         }
     });
 
-    if (captured_total == 0 && own_liberties == 0 &&
+    if (captured_total == 0 && g->board[coord + DIR_UP] != COLOR_EMPTY &&
+        g->board[coord + DIR_DOWN] != COLOR_EMPTY &&
+        g->board[coord + DIR_LEFT] != COLOR_EMPTY &&
+        g->board[coord + DIR_RIGHT] != COLOR_EMPTY &&
         !group_has_liberty(g, coord, own_color)) {
         g->board[coord] = COLOR_EMPTY;
         return MOVE_SUICIDAL;
@@ -265,18 +264,22 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
                                           g->width, g->height));
     }
 
-    /* Ko detection: exactly one single-stone group captured and the
-     * played stone has exactly one liberty and no own-color neighbors.
-     * Reconstruct the ko position here rather than tracking it in the
-     * hot loop.  goto early-outs when an own-color neighbor is found. */
+    /* Ko detection: exactly one single-stone group captured, the
+     * played stone is a lone stone, and it has exactly one liberty
+     * (the position where the captured stone was). */
     g->ko = COORD_PASS;
-    if (captured_total == 1 && own_liberties == 1) {
+    if (captured_total == 1) {
         uint16_t ko = COORD_PASS;
-        FOR_EACH_NEIGHBOR_DIR(coord, nb, dir_bit, {
+        uint8_t liberties = 0;
+        FOR_EACH_NEIGHBOR(coord, nb, {
             if (g->board[nb] == own_color)
                 goto ko_done;
-            if (move_hi & (dir_bit << (MOVE_CAP_SHIFT - 8)))
+            if (g->board[nb] == COLOR_EMPTY) {
                 ko = nb;
+                liberties++;
+                if (liberties > 1)
+                    goto ko_done;
+            }
         });
         g->ko = ko;
         move_hi |= (1 << (MOVE_KO_BIT - 8));
