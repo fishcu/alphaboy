@@ -8,8 +8,8 @@
 #include <gbdk/emu_debug.h>
 #endif
 
-/* Current flood-visited generation; 0 is reserved for "clear". */
-static uint8_t flood_generation = 1;
+/* Last used flood-visited generation; 0 is reserved for "clear". */
+static uint8_t flood_generation = 0;
 
 /* Unrolled four-neighbor iteration.  Each direction offset and bit
  * mask is a compile-time immediate — no loop counter, no table lookup.
@@ -86,9 +86,9 @@ static void flood_clear(uint8_t *p) __naked {
 }
 // clang-format on
 
-/* Start a fresh flood pass.  On generation wrap, clear the visited array and
- * restart from generation 1. */
-static uint8_t flood_next_generation(void) {
+/* Advance to a fresh flood generation.  On wrap to 0, clear the visited
+ * array and restart from 1. */
+static inline uint8_t flood_next_generation(void) {
     flood_generation++;
     if (flood_generation == 0) {
         flood_clear(flood_visited);
@@ -161,10 +161,11 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
     g->ko = COORD_PASS;
     g->move_count = 0;
     g->history_base = 0;
-    flood_generation = 1;
+
+    flood_clear(flood_visited);
+    flood_generation = 0;
 
     memset(g->board, COLOR_OFF_BOARD, BOARD_CELLS);
-    flood_clear(flood_visited);
 
     uint16_t pos = BOARD_COORD(0, 0);
     for (uint8_t row = 0; row < height; row++) {
