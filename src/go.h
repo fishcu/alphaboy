@@ -17,20 +17,15 @@
  *
  * A board position is encoded as (padded_row << COORD_SHIFT) | padded_col,
  * where padded_row = board_row + BOARD_MARGIN and likewise for col.
- * The stride of 1 << COORD_SHIFT (32) gives each bitfield row 4 bytes,
- * directly matching the BG tile map layout (32 tiles per row).
- * This unifies bitfield addressing, tile-map addressing, and neighbor
- * arithmetic under a single coordinate representation.
- *
- * BF_BYTE(pc) = pc >> 3, BF_MASK(pc) = 1 << (pc & 7). */
+ * The stride of 1 << COORD_SHIFT (32) directly matches the BG tile map
+ * layout (32 tiles per row).  This unifies scratch-buffer addressing,
+ * tile-map addressing, and neighbor arithmetic under a single packed
+ * coordinate representation. */
 #define COORD_SHIFT 5
 #define COORD_COL_MASK ((1u << COORD_SHIFT) - 1) /* 0x1F */
 
-/* Bitfield storage dimensions (4 bytes per row, matching stride 32).
- * Still used for flood_visited. */
-#define BF_ROW_BYTES (1 << (COORD_SHIFT - 3)) /* 4 */
+/* Padded board storage dimensions (21 logical rows, 32-byte stride). */
 #define BF_NUM_ROWS (BOARD_MAX_SIZE + 2 * BOARD_MARGIN)
-#define BOARD_FIELD_BYTES (BF_NUM_ROWS * BF_ROW_BYTES) /* 84 */
 
 /* Board array: one uint8_t per coordinate in the padded grid. */
 #define BOARD_CELLS (BF_NUM_ROWS << COORD_SHIFT) /* 672 */
@@ -85,7 +80,7 @@ typedef uint16_t move_t;
 
 #define MOVE_MAKE(coord, color)                                                \
     ((move_t)((coord) | ((move_t)(color) << MOVE_COLOR_BIT)))
-#define MOVE_COORD(m) ((m)&MOVE_COORD_MASK)
+#define MOVE_COORD(m) ((m) & MOVE_COORD_MASK)
 #define MOVE_COLOR(m) ((m) >> MOVE_COLOR_BIT)
 
 /* Maximum number of moves stored in history. */
@@ -96,28 +91,7 @@ typedef uint16_t move_t;
 /* Extract board-relative row / column (0-based, no margin) from a
  * packed coordinate.  Used in cold paths for surface tile lookups. */
 #define BOARD_ROW(pc) ((uint8_t)((pc) >> COORD_SHIFT) - BOARD_MARGIN)
-#define BOARD_COL(pc) ((uint8_t)((pc)&COORD_COL_MASK) - BOARD_MARGIN)
-
-/* --- Bit-field access helpers --- */
-
-/* Byte index for packed coordinate `pc`.  Trivial with stride-32 rows:
- * each row is 4 bytes, and bits within a row map naturally. */
-#define BF_BYTE(pc) ((pc) >> 3)
-
-/* Powers-of-two lookup table (avoids variable shifts on SM83). */
-extern const uint8_t pow2[8];
-
-/* Bit mask for packed coordinate `pc` within its byte. */
-#define BF_MASK(pc) (pow2[(pc)&7])
-
-/* Test whether the bit for packed coord `pc` is set in field `f`. */
-#define BF_GET(f, pc) ((f)[BF_BYTE(pc)] & BF_MASK(pc))
-
-/* Set the bit for packed coord `pc` in field `f`. */
-#define BF_SET(f, pc) ((f)[BF_BYTE(pc)] |= BF_MASK(pc))
-
-/* Clear the bit for packed coord `pc` in field `f`. */
-#define BF_CLR(f, pc) ((f)[BF_BYTE(pc)] &= (uint8_t)~BF_MASK(pc))
+#define BOARD_COL(pc) ((uint8_t)((pc) & COORD_COL_MASK) - BOARD_MARGIN)
 
 /* --- Coordinate helpers --- */
 
@@ -126,8 +100,6 @@ extern const uint8_t pow2[8];
 #define BOARD_COORD(col, row)                                                  \
     ((uint16_t)((((row) + BOARD_MARGIN) << COORD_SHIFT) |                      \
                 ((col) + BOARD_MARGIN)))
-
-typedef uint8_t bitfield_t[BOARD_FIELD_BYTES];
 
 typedef struct game {
     uint8_t width;
@@ -160,12 +132,12 @@ void game_play_pass(game_t *g, color_t color);
 
 /* Play a stone at the packed coordinate `coord` for `color`.  Updates the
  * board state and writes changed tiles to VRAM incrementally.
- * Uses flood_stack / flood_visited from layout.h as scratch buffers.
+ * Uses flood_deque / flood_visited from layout.h as scratch buffers.
  * Returns a move_legality_t indicating whether the move was played. */
 move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color);
 
 /* Undo the last move, restoring captured stones and ko state.
- * Uses flood_stack from layout.h as a scratch buffer.
+ * Uses flood_deque from layout.h as a scratch buffer.
  * Returns UNDO_OK on success, UNDO_NO_HISTORY if nothing to undo. */
 undo_result_t game_undo(game_t *g);
 

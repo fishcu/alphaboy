@@ -43,7 +43,7 @@ typedef struct sram_layout {
     input_t input;
     cursor_t cursor;
     uint16_t flood_deque[BOARD_POSITIONS];
-    uint8_t flood_visited[BOARD_FIELD_BYTES];
+    uint8_t flood_visited[BOARD_CELLS];
 } sram_layout_t;
 
 _Static_assert(sizeof(sram_layout_t) <= 0x2000u, "SRAM overflow");

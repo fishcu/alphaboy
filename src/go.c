@@ -8,8 +8,8 @@
 #include <gbdk/emu_debug.h>
 #endif
 
-/* Powers-of-two lookup table (avoids variable shifts on SM83). */
-const uint8_t pow2[8] = {1, 2, 4, 8, 16, 32, 64, 128};
+/* Current flood-visited generation; 0 is reserved for "clear". */
+static uint8_t flood_generation = 1;
 
 /* Unrolled four-neighbor iteration.  Each direction offset and bit
  * mask is a compile-time immediate — no loop counter, no table lookup.
@@ -60,76 +60,94 @@ const uint8_t pow2[8] = {1, 2, 4, 8, 16, 32, 64, 128};
 
 /* ---- Flood fill for liberty detection ---- */
 
-/* Flood-fill the group containing `seed`, recording every stone in
- * flood_deque[0..tail-1].  Uses BFS to fully traverse the group
- * (no early-out) so that flood_visited stays complete across calls.
- * `stone_color` is the color to follow (COLOR_BLACK or COLOR_WHITE).
- * Precondition: seed must not already be in flood_visited.
- * Returns the number of liberties (capped at UINT8_MAX); 0 = captured.
- * After return, flood_deque[0..group_size-1] holds the group coords;
- * read the returned tail via the `group_size` output parameter. */
-static uint8_t group_liberties(const game_t *g, uint16_t seed,
-                               uint8_t stone_color, uint16_t *group_size) {
-    assert(!BF_GET(flood_visited, seed) && "seed already visited");
+/* Clear the first 21 bytes of each 32-byte row in the padded flood-visited
+ * array (21 rows total).  The remaining 11 padding bytes per row are never
+ * addressed by board logic, so we skip them. */
+// clang-format off
+static void flood_clear(uint8_t *p) __naked {
+    (void)p;
+    __asm
+        ld l, e
+        ld h, d
+        xor a
+        ld c, #21
+    00160$:
+        ld b, #21
+    00161$:
+        ld (hl+), a
+        dec b
+        jr NZ, 00161$
+        ld de, #11
+        add hl, de
+        dec c
+        jr NZ, 00160$
+        ret
+    __endasm;
+}
+// clang-format on
 
-    uint16_t head = 0;
-    uint16_t tail = 0;
-    uint8_t liberties = 0;
-
-    BF_SET(flood_visited, seed);
-    flood_deque[tail++] = seed;
-
-    while (head < tail) {
-        uint16_t pos = flood_deque[head++];
-        uint16_t nb;
-        FOR_EACH_NEIGHBOR(pos, nb, {
-            if (!BF_GET(flood_visited, nb)) {
-                uint8_t cell = g->board[nb];
-                if (cell == stone_color) {
-                    BF_SET(flood_visited, nb);
-                    flood_deque[tail++] = nb;
-                } else if (cell == COLOR_EMPTY) {
-                    if (liberties < UINT8_MAX)
-                        liberties++;
-                }
-            }
-        });
+/* Start a fresh flood pass.  On generation wrap, clear the visited array and
+ * restart from generation 1. */
+static uint8_t flood_next_generation(void) {
+    flood_generation++;
+    if (flood_generation == 0) {
+        flood_clear(flood_visited);
+        flood_generation = 1;
     }
-
-    *group_size = tail;
-    return liberties;
+    return flood_generation;
 }
 
-/* Quick suicide test: does the group at `seed` have at least one liberty?
- * Returns 1 immediately on the first liberty found, 0 if captured.
- * Does not record group size.  May leave flood_visited incomplete,
- * so this must be the last flood operation for the current move. */
+#define GROUP_HAS_LIBERTY_CORE()                                               \
+    while (head < tail) {                                                      \
+        uint16_t pos = flood_deque[head++];                                    \
+        uint16_t nb;                                                           \
+        FOR_EACH_NEIGHBOR(pos, nb, {                                           \
+            if (flood_visited[nb] != generation) {                             \
+                uint8_t cell = g->board[nb];                                   \
+                if (cell == stone_color) {                                     \
+                    flood_visited[nb] = generation;                            \
+                    flood_deque[tail++] = nb;                                  \
+                } else if (cell == COLOR_EMPTY) {                              \
+                    return 1;                                                  \
+                }                                                              \
+            }                                                                  \
+        });                                                                    \
+    }
+
+/* Flood-fill for opponent-capture probing.  Returns 1 immediately on the first
+ * liberty found.  If it returns 0, flood_deque[0..group_size-1] contains the
+ * fully traversed captured group. */
+static uint8_t group_has_liberty_capture(const game_t *g, uint16_t seed,
+                                         uint8_t stone_color,
+                                         uint16_t *group_size) {
+    uint16_t head = 0;
+    uint16_t tail = 0;
+    uint8_t generation = flood_next_generation();
+
+    flood_visited[seed] = generation;
+    flood_deque[tail++] = seed;
+
+    GROUP_HAS_LIBERTY_CORE();
+    *group_size = tail;
+    return 0;
+}
+
+/* Flood-fill for suicide checking.  Returns 1 immediately on the first
+ * liberty found, 0 if the played group is dead. */
 static uint8_t group_has_liberty(const game_t *g, uint16_t seed,
                                  uint8_t stone_color) {
     uint16_t head = 0;
     uint16_t tail = 0;
+    uint8_t generation = flood_next_generation();
 
-    BF_SET(flood_visited, seed);
+    flood_visited[seed] = generation;
     flood_deque[tail++] = seed;
 
-    while (head < tail) {
-        uint16_t pos = flood_deque[head++];
-        uint16_t nb;
-        FOR_EACH_NEIGHBOR(pos, nb, {
-            if (!BF_GET(flood_visited, nb)) {
-                uint8_t cell = g->board[nb];
-                if (cell == stone_color) {
-                    BF_SET(flood_visited, nb);
-                    flood_deque[tail++] = nb;
-                } else if (cell == COLOR_EMPTY) {
-                    return 1;
-                }
-            }
-        });
-    }
-
+    GROUP_HAS_LIBERTY_CORE();
     return 0;
 }
+
+#undef GROUP_HAS_LIBERTY_CORE
 
 void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
     assert(width >= BOARD_MIN_SIZE && width <= BOARD_MAX_SIZE &&
@@ -143,8 +161,10 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
     g->ko = COORD_PASS;
     g->move_count = 0;
     g->history_base = 0;
+    flood_generation = 1;
 
     memset(g->board, COLOR_OFF_BOARD, BOARD_CELLS);
+    flood_clear(flood_visited);
 
     uint16_t pos = BOARD_COORD(0, 0);
     for (uint8_t row = 0; row < height; row++) {
@@ -169,40 +189,6 @@ void game_play_pass(game_t *g, color_t color) {
     g->history[g->move_count++ % HISTORY_MAX] = MOVE_MAKE(COORD_PASS, color);
 }
 
-/* Clear the first 3 bytes of each 4-byte bitfield row (21 rows).
- * Byte 3 of each row (columns 24-31) is never set by any board
- * operation and stays zero, so we skip it.  3x unrolled loop:
- * 7 iterations × 3 rows = 21 rows, ~196 cycles.
- *
- * __sdcccall(1): first 16-bit param arrives in DE. */
-// clang-format off
-static void bf_clear(uint8_t *p) __naked {
-    (void)p;
-    __asm
-        ld l, e
-        ld h, d
-        xor a
-        ld c, #7
-    00180$:
-        ld (hl+), a
-        ld (hl+), a
-        ld (hl+), a
-        inc hl
-        ld (hl+), a
-        ld (hl+), a
-        ld (hl+), a
-        inc hl
-        ld (hl+), a
-        ld (hl+), a
-        ld (hl+), a
-        inc hl
-        dec c
-        jr NZ, 00180$
-        ret
-    __endasm;
-}
-// clang-format on
-
 move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
     if (coord == g->ko)
         return MOVE_KO;
@@ -210,8 +196,6 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
     assert(g->board[coord] != COLOR_OFF_BOARD && "coord must be on board");
     if (g->board[coord] != COLOR_EMPTY)
         return MOVE_NON_EMPTY;
-
-    bf_clear(flood_visited);
 
     color_t own_color = color;
     color_t opp_color = COLOR_OPPOSITE(color);
@@ -225,13 +209,12 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
     FOR_EACH_NEIGHBOR_DIR(coord, nb, dir_bit, {
         uint8_t cell = g->board[nb];
         if (cell == opp_color) {
-            if (!BF_GET(flood_visited, nb) &&
-                g->board[nb + DIR_UP] != COLOR_EMPTY &&
+            if (g->board[nb + DIR_UP] != COLOR_EMPTY &&
                 g->board[nb + DIR_DOWN] != COLOR_EMPTY &&
                 g->board[nb + DIR_LEFT] != COLOR_EMPTY &&
                 g->board[nb + DIR_RIGHT] != COLOR_EMPTY) {
                 uint16_t group_size;
-                if (group_liberties(g, nb, opp_color, &group_size) == 0) {
+                if (!group_has_liberty_capture(g, nb, opp_color, &group_size)) {
                     for (uint16_t i = 0; i < group_size; i++) {
                         uint16_t cap = flood_deque[i];
                         g->board[cap] = COLOR_EMPTY;
@@ -252,10 +235,11 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
     if (captured_total == 0 && g->board[coord + DIR_UP] != COLOR_EMPTY &&
         g->board[coord + DIR_DOWN] != COLOR_EMPTY &&
         g->board[coord + DIR_LEFT] != COLOR_EMPTY &&
-        g->board[coord + DIR_RIGHT] != COLOR_EMPTY &&
-        !group_has_liberty(g, coord, own_color)) {
-        g->board[coord] = COLOR_EMPTY;
-        return MOVE_SUICIDAL;
+        g->board[coord + DIR_RIGHT] != COLOR_EMPTY) {
+        if (!group_has_liberty(g, coord, own_color)) {
+            g->board[coord] = COLOR_EMPTY;
+            return MOVE_SUICIDAL;
+        }
     }
 
     /* Clear previous ko marker tile. */
