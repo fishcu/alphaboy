@@ -17,10 +17,10 @@
 
 /* Return the board-surface tile for an empty intersection. */
 uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
-    uint8_t top = (row == 0);
-    uint8_t bottom = (row == h - 1);
-    uint8_t left = (col == 0);
-    uint8_t right = (col == w - 1);
+    const uint8_t top = (row == 0);
+    const uint8_t bottom = (row == h - 1);
+    const uint8_t left = (col == 0);
+    const uint8_t right = (col == w - 1);
 
     if (top) {
         if (left)
@@ -44,9 +44,9 @@ uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
     /* Star-point (hoshi) check for interior intersections.
      * >= 13: 4th line from edge, corners + sides + center.
      * < 13:  3rd line from edge, corners + center only. */
-    uint8_t d = (w >= 13 && h >= 13) ? 3 : 2;
-    uint8_t on_col = (col == d || col == w - 1 - d || col == w / 2);
-    uint8_t on_row = (row == d || row == h - 1 - d || row == h / 2);
+    const uint8_t d = (w >= 13 && h >= 13) ? 3 : 2;
+    const uint8_t on_col = (col == d || col == w - 1 - d || col == w / 2);
+    const uint8_t on_row = (row == d || row == h - 1 - d || row == h / 2);
     if (on_col && on_row) {
         if (w >= 13 && h >= 13)
             return TILE_HOSHI;
@@ -73,7 +73,7 @@ uint8_t ko_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
  * A single byte store completes in 1 M-cycle (4 clocks), well
  * within any VRAM-accessible window. */
 void vram_set_tile(uint16_t pc, uint8_t tile) {
-    volatile uint8_t *addr = (volatile uint8_t *)(0x9800u + pc);
+    volatile uint8_t *const addr = (volatile uint8_t *)(0x9800u + pc);
     while (STAT_REG & STATF_BUSY) {
     }
     *addr = tile;
@@ -83,8 +83,8 @@ void vram_set_tile(uint16_t pc, uint8_t tile) {
  * Draws the decorative frame and all intersections.
  * During gameplay, game_play_move updates tiles incrementally. */
 static void board_redraw(const game_t *g) {
-    uint8_t w = g->width;
-    uint8_t h = g->height;
+    const uint8_t w = g->width;
+    const uint8_t h = g->height;
 
     /* ---- Frame ---- */
 
@@ -96,14 +96,14 @@ static void board_redraw(const game_t *g) {
 
     /* Left and right columns. */
     for (uint8_t row = 0; row < h; row++) {
-        uint16_t ry = VRAM_XY(0, row + BOARD_MARGIN);
+        const uint16_t ry = VRAM_XY(0, row + BOARD_MARGIN);
         vram_set_tile(ry, TILE_FRAME_L);
         vram_set_tile(ry | (w + BOARD_MARGIN), TILE_FRAME_R);
     }
 
     /* Bottom rows (two tiles tall). */
-    uint16_t by1 = VRAM_XY(0, h + BOARD_MARGIN);
-    uint16_t by2 = VRAM_XY(0, h + BOARD_MARGIN + 1);
+    const uint16_t by1 = VRAM_XY(0, h + BOARD_MARGIN);
+    const uint16_t by2 = VRAM_XY(0, h + BOARD_MARGIN + 1);
     vram_set_tile(by1, TILE_FRAME_BL_U);
     vram_set_tile(by2, TILE_FRAME_BL_D);
     for (uint8_t col = 0; col < w; col++) {
@@ -140,8 +140,8 @@ static void board_redraw(const game_t *g) {
     /* ---- Last-played marker ---- */
 
     if (g->move_count > g->history_base) {
-        move_t last = g->history[(g->move_count - 1) % HISTORY_MAX];
-        uint16_t lc = MOVE_COORD(last);
+        const move_t last = g->history[(g->move_count - 1) % HISTORY_MAX];
+        const uint16_t lc = MOVE_COORD(last);
         if (lc != COORD_PASS) {
             vram_set_tile(lc, (MOVE_COLOR(last) == COLOR_BLACK) ? TILE_LAST_B
                                                                 : TILE_LAST_W);
@@ -249,7 +249,7 @@ void main(void) {
     ENABLE_RAM;
 
     /* Initialize and draw the board. */
-    game_t *g = game_state;
+    game_t *const g = game_state;
     game_reset(g, 19, 19, 13);
 
 #ifndef NDEBUG
@@ -261,8 +261,8 @@ void main(void) {
      * Board intersections start at BG tile column/row BOARD_MARGIN.
      * The 256x256 BG wraps; scroll offsets place the board roughly
      * centered, shifted up by SCROLL_ADJUST_Y to show the bottom frame. */
-    uint8_t offset_x = (SCREEN_W * 8 - g->width * CELL_W) / 2;
-    uint8_t offset_y =
+    const uint8_t offset_x = (SCREEN_W * 8 - g->width * CELL_W) / 2;
+    const uint8_t offset_y =
         (SCREEN_H * 8 - g->height * CELL_H) / 2 - SCROLL_ADJUST_Y;
 
     SCX_REG = (uint8_t)(BOARD_MARGIN * 8 - (int16_t)offset_x);
@@ -275,10 +275,12 @@ void main(void) {
      * dummy_period = total_delay - 796.
      * Each TIMER_CALIB unit = 1 tick = 4 M-cycles. */
     {
-        uint8_t first_line = offset_y - 1;
-        uint16_t delay = (uint16_t)7 * 114 + (uint16_t)first_line * 114 + 63;
-        uint16_t dummy_delay = delay - ((uint16_t)(256 - (TIMER_TMA ^ 1)) << 2);
-        uint8_t ticks = (uint8_t)((dummy_delay + 3) >> 2) + TIMER_CALIB;
+        const uint8_t first_line = offset_y - 1;
+        const uint16_t delay =
+            (uint16_t)7 * 114 + (uint16_t)first_line * 114 + 63;
+        const uint16_t dummy_delay =
+            delay - ((uint16_t)(256 - (TIMER_TMA ^ 1)) << 2);
+        const uint8_t ticks = (uint8_t)((dummy_delay + 3) >> 2) + TIMER_CALIB;
         timer_initial = (uint8_t)(0 - ticks);
     }
 
@@ -309,9 +311,10 @@ void main(void) {
         input_poll(game_input);
 
         if (game_input->pressed & J_A) {
-            color_t color = game_color_to_play(g);
-            uint16_t coord = BOARD_COORD(game_cursor->col, game_cursor->row);
-            move_legality_t result = game_play_move(g, coord, color);
+            const color_t color = game_color_to_play(g);
+            const uint16_t coord =
+                BOARD_COORD(game_cursor->col, game_cursor->row);
+            const move_legality_t result = game_play_move(g, coord, color);
 
             if (result == MOVE_LEGAL) {
                 cursor_invalidate(game_cursor);

@@ -8,7 +8,7 @@
  * Board is drawn at BG tile (0,0) and centered via scroll registers.
  * OAM X = screen_offset + col*CELL_W + 8 (OAM hardware offset). */
 static uint16_t target_x(uint8_t col, uint8_t board_w) {
-    uint8_t offset = (SCREEN_W * 8 - board_w * CELL_W) / 2 - 1;
+    const uint8_t offset = (SCREEN_W * 8 - board_w * CELL_W) / 2 - 1;
     return (uint16_t)(offset + col * CELL_W + 8) << 8;
 }
 
@@ -16,7 +16,8 @@ static uint16_t target_x(uint8_t col, uint8_t board_w) {
  * Vertical compression: each cell is CELL_H pixels on screen.
  * OAM Y = screen_offset + row*CELL_H + 16 (OAM hardware offset). */
 static uint16_t target_y(uint8_t row, uint8_t board_h) {
-    uint8_t offset = (SCREEN_H * 8 - board_h * CELL_H) / 2 - SCROLL_ADJUST_Y;
+    const uint8_t offset =
+        (SCREEN_H * 8 - board_h * CELL_H) / 2 - SCROLL_ADJUST_Y;
     return (uint16_t)(offset + row * CELL_H + 15) << 8;
 }
 
@@ -33,7 +34,7 @@ static void recompute_ghost(cursor_t *c, const game_t *g) {
 /* Move `cur` toward `tgt` with exponential tracking.
  * Clamps to CURSOR_MIN_STEP to avoid slow crawl, but never overshoots. */
 static uint16_t track(uint16_t cur, uint16_t tgt) {
-    int16_t delta = (int16_t)(tgt - cur);
+    const int16_t delta = (int16_t)(tgt - cur);
     if (delta == 0)
         return cur;
 
@@ -79,9 +80,9 @@ void cursor_init(cursor_t *c, uint8_t col, uint8_t row, const game_t *g) {
 void cursor_invalidate(cursor_t *c) { c->dirty = 1; }
 
 void cursor_update(cursor_t *c, const input_t *inp, const game_t *g) {
-    uint8_t old_col = c->col;
-    uint8_t old_row = c->row;
-    uint8_t trigger = inp->pressed | inp->repeated;
+    const uint8_t old_col = c->col;
+    const uint8_t old_row = c->row;
+    const uint8_t trigger = inp->pressed | inp->repeated;
 
     if ((trigger & J_LEFT) && c->col > 0)
         c->col--;
@@ -92,7 +93,7 @@ void cursor_update(cursor_t *c, const input_t *inp, const game_t *g) {
     if ((trigger & J_DOWN) && c->row < g->height - 1)
         c->row++;
 
-    uint8_t moved = (c->col != old_col || c->row != old_row);
+    const uint8_t moved = (c->col != old_col || c->row != old_row);
     if (moved || c->dirty) {
         if (c->ghost_tile && moved)
             vram_set_tile(BOARD_COORD(old_col, old_row), c->surface_cache);
@@ -101,8 +102,8 @@ void cursor_update(cursor_t *c, const input_t *inp, const game_t *g) {
     }
 
     /* Smooth tracking toward target pixel position. */
-    uint16_t tx = target_x(c->col, g->width);
-    uint16_t ty = target_y(c->row, g->height);
+    const uint16_t tx = target_x(c->col, g->width);
+    const uint16_t ty = target_y(c->row, g->height);
     c->x = track(c->x, tx);
     c->y = track(c->y, ty);
 
@@ -112,13 +113,14 @@ void cursor_update(cursor_t *c, const input_t *inp, const game_t *g) {
 
 void cursor_draw(const cursor_t *c) {
     if (c->ghost_tile) {
-        uint8_t tile = (frame_count & 1) ? c->ghost_tile : c->surface_cache;
+        const uint8_t tile =
+            (frame_count & 1) ? c->ghost_tile : c->surface_cache;
         vram_set_tile(BOARD_COORD(c->col, c->row), tile);
     }
 
-    uint8_t px = (c->x + 128) >> 8;
-    uint8_t py = (c->y + 128) >> 8;
-    uint8_t s = c->spread;
+    const uint8_t px = (c->x + 128) >> 8;
+    const uint8_t py = (c->y + 128) >> 8;
+    const uint8_t s = c->spread;
 
     move_sprite(CURSOR_SPR_UL, px - 1 - s, py - 1 - s);
     move_sprite(CURSOR_SPR_UR, px + 2 + s, py - 1 - s);

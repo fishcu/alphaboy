@@ -67,9 +67,9 @@ uint8_t demo_step(game_t *g) {
         return 0;
     demo_timer = 0;
 
-    uint8_t col = demo_moves[demo_index * 2];
-    uint8_t row = demo_moves[demo_index * 2 + 1];
-    uint8_t color = game_color_to_play(g);
+    const uint8_t col = demo_moves[demo_index * 2];
+    const uint8_t row = demo_moves[demo_index * 2 + 1];
+    const uint8_t color = game_color_to_play(g);
 
     game_play_move(g, BOARD_COORD(col, row), color);
     demo_index++;

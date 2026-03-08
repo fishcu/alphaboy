@@ -99,11 +99,11 @@ static inline uint8_t flood_next_generation(void) {
 
 #define GROUP_HAS_LIBERTY_CORE()                                               \
     while (head < tail) {                                                      \
-        uint16_t pos = flood_deque[head++];                                    \
+        const uint16_t pos = flood_deque[head++];                              \
         uint16_t nb;                                                           \
         FOR_EACH_NEIGHBOR(pos, nb, {                                           \
             if (flood_visited[nb] != generation) {                             \
-                uint8_t cell = g->board[nb];                                   \
+                const uint8_t cell = g->board[nb];                             \
                 if (cell == stone_color) {                                     \
                     flood_visited[nb] = generation;                            \
                     flood_deque[tail++] = nb;                                  \
@@ -122,7 +122,7 @@ static uint8_t group_has_liberty_capture(const game_t *g, uint16_t seed,
                                          uint16_t *group_size) {
     uint16_t head = 0;
     uint16_t tail = 0;
-    uint8_t generation = flood_next_generation();
+    const uint8_t generation = flood_next_generation();
 
     flood_visited[seed] = generation;
     flood_deque[tail++] = seed;
@@ -138,7 +138,7 @@ static uint8_t group_has_liberty(const game_t *g, uint16_t seed,
                                  uint8_t stone_color) {
     uint16_t head = 0;
     uint16_t tail = 0;
-    uint8_t generation = flood_next_generation();
+    const uint8_t generation = flood_next_generation();
 
     flood_visited[seed] = generation;
     flood_deque[tail++] = seed;
@@ -198,8 +198,8 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
     if (g->board[coord] != COLOR_EMPTY)
         return MOVE_NON_EMPTY;
 
-    color_t own_color = color;
-    color_t opp_color = COLOR_OPPOSITE(color);
+    const color_t own_color = color;
+    const color_t opp_color = COLOR_OPPOSITE(color);
     g->board[coord] = own_color;
 
     uint8_t move_hi = (uint8_t)((coord >> 8) | (color << (MOVE_COLOR_BIT - 8)));
@@ -208,7 +208,7 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
     uint16_t nb;
     uint8_t dir_bit;
     FOR_EACH_NEIGHBOR_DIR(coord, nb, dir_bit, {
-        uint8_t cell = g->board[nb];
+        const uint8_t cell = g->board[nb];
         if (cell == opp_color) {
             if (g->board[nb + DIR_UP] != COLOR_EMPTY &&
                 g->board[nb + DIR_DOWN] != COLOR_EMPTY &&
@@ -217,7 +217,7 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
                 uint16_t group_size;
                 if (!group_has_liberty_capture(g, nb, opp_color, &group_size)) {
                     for (uint16_t i = 0; i < group_size; i++) {
-                        uint16_t cap = flood_deque[i];
+                        const uint16_t cap = flood_deque[i];
                         g->board[cap] = COLOR_EMPTY;
                         vram_set_tile(cap, surface_tile(BOARD_COL(cap),
                                                         BOARD_ROW(cap),
@@ -275,10 +275,10 @@ ko_done:;
 
     /* Un-mark previous last-played stone. */
     if (g->move_count > g->history_base) {
-        move_t prev = g->history[(g->move_count - 1) % HISTORY_MAX];
-        uint16_t pc = MOVE_COORD(prev);
+        const move_t prev = g->history[(g->move_count - 1) % HISTORY_MAX];
+        const uint16_t pc = MOVE_COORD(prev);
         if (pc != COORD_PASS) {
-            uint8_t prev_color = g->board[pc];
+            const uint8_t prev_color = g->board[pc];
             if (prev_color == COLOR_BLACK)
                 vram_set_tile(pc, TILE_STONE_B);
             else if (prev_color == COLOR_WHITE)
@@ -303,13 +303,14 @@ undo_result_t game_undo(game_t *g) {
         return UNDO_NO_HISTORY;
 
     g->move_count--;
-    move_t move = g->history[g->move_count % HISTORY_MAX];
-    uint16_t coord = MOVE_COORD(move);
+    const move_t move = g->history[g->move_count % HISTORY_MAX];
+    const uint16_t coord = MOVE_COORD(move);
 
     if (coord != COORD_PASS) {
-        color_t color = MOVE_COLOR(move);
-        color_t opp_color = COLOR_OPPOSITE(color);
-        uint8_t opp_tile = (color == COLOR_BLACK) ? TILE_STONE_W : TILE_STONE_B;
+        const color_t color = MOVE_COLOR(move);
+        const color_t opp_color = COLOR_OPPOSITE(color);
+        const uint8_t opp_tile =
+            (color == COLOR_BLACK) ? TILE_STONE_W : TILE_STONE_B;
 
         /* Restore captured groups by flood-filling through empties.
          * Each captured group's empty region is fully enclosed by the
@@ -326,7 +327,7 @@ undo_result_t game_undo(game_t *g) {
                 g->board[nb] = opp_color;
 
                 while (head < tail) {
-                    uint16_t pos = flood_deque[head++];
+                    const uint16_t pos = flood_deque[head++];
                     vram_set_tile(pos, opp_tile);
                     uint16_t adj;
                     FOR_EACH_NEIGHBOR(pos, adj, {
@@ -350,9 +351,9 @@ undo_result_t game_undo(game_t *g) {
     if (g->move_count == 0) {
         g->ko = COORD_PASS;
     } else {
-        move_t prev = g->history[(g->move_count - 1) % HISTORY_MAX];
+        const move_t prev = g->history[(g->move_count - 1) % HISTORY_MAX];
         if (prev & (1u << MOVE_KO_BIT)) {
-            uint16_t prev_coord = MOVE_COORD(prev);
+            const uint16_t prev_coord = MOVE_COORD(prev);
             uint16_t nb;
             uint8_t dir_bit;
             FOR_EACH_NEIGHBOR_DIR(prev_coord, nb, dir_bit, {
@@ -372,8 +373,8 @@ undo_result_t game_undo(game_t *g) {
 
     /* Mark the now-current last move as last-played. */
     if (g->move_count > g->history_base) {
-        move_t last = g->history[(g->move_count - 1) % HISTORY_MAX];
-        uint16_t lc = MOVE_COORD(last);
+        const move_t last = g->history[(g->move_count - 1) % HISTORY_MAX];
+        const uint16_t lc = MOVE_COORD(last);
         if (lc != COORD_PASS) {
             vram_set_tile(lc, (MOVE_COLOR(last) == COLOR_BLACK) ? TILE_LAST_B
                                                                 : TILE_LAST_W);
@@ -391,7 +392,7 @@ color_t game_color_to_play(const game_t *g) {
 }
 
 uint8_t game_can_play_approx(const game_t *g, uint8_t col, uint8_t row) {
-    uint16_t coord = BOARD_COORD(col, row);
+    const uint16_t coord = BOARD_COORD(col, row);
     if (coord == g->ko)
         return 0;
     if (g->board[coord] != COLOR_EMPTY)
@@ -401,8 +402,8 @@ uint8_t game_can_play_approx(const game_t *g, uint8_t col, uint8_t row) {
 
 #ifndef NDEBUG
 void game_debug_print(const game_t *g) {
-    uint8_t w = g->width;
-    uint8_t h = g->height;
+    const uint8_t w = g->width;
+    const uint8_t h = g->height;
     uint16_t pos = BOARD_COORD(0, 0);
     /* Worst case: 19 chars + 18 spaces + null = 38 bytes. */
     char row_str[BOARD_MAX_SIZE * 2];
