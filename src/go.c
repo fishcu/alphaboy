@@ -181,8 +181,8 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
 
 void game_play_pass(game_t *g, color_t color) {
     if (g->ko != COORD_PASS) {
-        vram_set_tile(g->ko, surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
-                                          g->width, g->height));
+        tile_push(g->ko, surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
+                                      g->width, g->height));
     }
     g->ko = COORD_PASS;
     if (g->move_count >= g->history_base + HISTORY_MAX)
@@ -219,9 +219,9 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
                     for (uint16_t i = 0; i < group_size; i++) {
                         const uint16_t cap = flood_deque[i];
                         g->board[cap] = COLOR_EMPTY;
-                        vram_set_tile(cap, surface_tile(BOARD_COL(cap),
-                                                        BOARD_ROW(cap),
-                                                        g->width, g->height));
+                        tile_push(cap,
+                                  surface_tile(BOARD_COL(cap), BOARD_ROW(cap),
+                                               g->width, g->height));
                     }
                     move_hi |= dir_bit << (MOVE_CAP_SHIFT - 8);
                     if (captured_total == 0 && group_size == 1)
@@ -245,8 +245,8 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
 
     /* Clear previous ko marker tile. */
     if (g->ko != COORD_PASS) {
-        vram_set_tile(g->ko, surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
-                                          g->width, g->height));
+        tile_push(g->ko, surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
+                                      g->width, g->height));
     }
 
     /* Ko detection: exactly one single-stone group captured, the
@@ -268,8 +268,8 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
         });
         g->ko = ko;
         move_hi |= (1 << (MOVE_KO_BIT - 8));
-        vram_set_tile(g->ko, ko_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
-                                     g->width, g->height));
+        tile_push(g->ko, ko_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko), g->width,
+                                 g->height));
     }
 ko_done:;
 
@@ -280,13 +280,13 @@ ko_done:;
         if (pc != COORD_PASS) {
             const uint8_t prev_color = g->board[pc];
             if (prev_color == COLOR_BLACK)
-                vram_set_tile(pc, TILE_STONE_B);
+                tile_push(pc, TILE_STONE_B);
             else if (prev_color == COLOR_WHITE)
-                vram_set_tile(pc, TILE_STONE_W);
+                tile_push(pc, TILE_STONE_W);
         }
     }
 
-    vram_set_tile(coord, (color == COLOR_BLACK) ? TILE_LAST_B : TILE_LAST_W);
+    tile_push(coord, (color == COLOR_BLACK) ? TILE_LAST_B : TILE_LAST_W);
     if (g->move_count >= g->history_base + HISTORY_MAX)
         g->history_base++;
     /* Reassemble the full move_t from the 8-bit high byte (flags + coord
@@ -328,7 +328,7 @@ undo_result_t game_undo(game_t *g) {
 
                 while (head < tail) {
                     const uint16_t pos = flood_deque[head++];
-                    vram_set_tile(pos, opp_tile);
+                    tile_push(pos, opp_tile);
                     uint16_t adj;
                     FOR_EACH_NEIGHBOR(pos, adj, {
                         if (g->board[adj] == COLOR_EMPTY) {
@@ -342,8 +342,8 @@ undo_result_t game_undo(game_t *g) {
 
         /* Remove the played stone. */
         g->board[coord] = COLOR_EMPTY;
-        vram_set_tile(coord, surface_tile(BOARD_COL(coord), BOARD_ROW(coord),
-                                          g->width, g->height));
+        tile_push(coord, surface_tile(BOARD_COL(coord), BOARD_ROW(coord),
+                                      g->width, g->height));
     }
 
     /* Restore ko state.  The early-out above guarantees that when
@@ -367,8 +367,8 @@ undo_result_t game_undo(game_t *g) {
 
     /* Write ko tile if the restored state has an active ko. */
     if (g->ko != COORD_PASS) {
-        vram_set_tile(g->ko, ko_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
-                                     g->width, g->height));
+        tile_push(g->ko, ko_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko), g->width,
+                                 g->height));
     }
 
     /* Mark the now-current last move as last-played. */
@@ -376,8 +376,8 @@ undo_result_t game_undo(game_t *g) {
         const move_t last = g->history[(g->move_count - 1) % HISTORY_MAX];
         const uint16_t lc = MOVE_COORD(last);
         if (lc != COORD_PASS) {
-            vram_set_tile(lc, (MOVE_COLOR(last) == COLOR_BLACK) ? TILE_LAST_B
-                                                                : TILE_LAST_W);
+            tile_push(lc, (MOVE_COLOR(last) == COLOR_BLACK) ? TILE_LAST_B
+                                                            : TILE_LAST_W);
         }
     }
 

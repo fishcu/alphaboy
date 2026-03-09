@@ -71,12 +71,26 @@ uint8_t ko_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
  * Writes one byte to the BG tilemap without disabling interrupts.
  * Waits for VRAM-accessible mode (HBlank or VBlank), then stores.
  * A single byte store completes in 1 M-cycle (4 clocks), well
- * within any VRAM-accessible window. */
+ * within any VRAM-accessible window.
+ * Used only during init (display off) by board_redraw. */
 void vram_set_tile(uint16_t pc, uint8_t tile) {
     volatile uint8_t *const addr = (volatile uint8_t *)(0x9800u + pc);
     while (STAT_REG & STATF_BUSY) {
     }
     *addr = tile;
+}
+
+/* Push a tile update onto the deferred stack.  Busy-waits if the
+ * stack is full (the VBlank ISR will drain entries to make room). */
+void tile_push(uint16_t pc, uint8_t tile) {
+    while (tile_stack_top >= TILE_STACK_MAX) {
+    }
+    CRITICAL {
+        uint8_t top = tile_stack_top;
+        tile_stack[top].pc = pc;
+        tile_stack[top].tile = tile;
+        tile_stack_top = top + 1;
+    }
 }
 
 /* Full board redraw — used only at init (display off, fast).
@@ -220,6 +234,27 @@ static void vbl_isr(void) NONBANKED {
     TMA_REG = TIMER_TMA;
     DIV_REG = 0;
     IF_REG &= ~TIM_IFLAG;
+
+    /* Drain tile stack — VRAM is freely accessible during VBlank. */
+    uint8_t top = tile_stack_top;
+    uint8_t n = TILE_DRAIN_LIMIT;
+    while (top > 0 && n > 0) {
+        top--;
+        *(volatile uint8_t *)(0x9800u + tile_stack[top].pc) =
+            tile_stack[top].tile;
+        n--;
+    }
+    tile_stack_top = top;
+
+    /* Ghost stone flicker — written after drain so it takes visual
+     * priority when the cursor overlaps a pending game-tile update. */
+    const uint8_t ghost = game_cursor->ghost_tile;
+    if (ghost) {
+        const uint16_t pc = BOARD_COORD(game_cursor->col, game_cursor->row);
+        *(volatile uint8_t *)(0x9800u + pc) =
+            (frame_count & 1) ? ghost : game_cursor->surface_cache;
+    }
+
     frame_count++;
 }
 
@@ -247,6 +282,8 @@ void main(void) {
 
     /* Enable SRAM. */
     ENABLE_RAM;
+
+    tile_stack_top = 0;
 
     /* Initialize and draw the board. */
     game_t *const g = game_state;

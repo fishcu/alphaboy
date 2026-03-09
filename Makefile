@@ -136,7 +136,7 @@ endif
 GB_FLAMEGRAPH  = npx --yes https://github.com/chrismaltby/gb-flamegraph.git
 FLAMEGRAPH_DIR = build/flamegraph
 PROFILE_ROM    = build/profile/$(PROJECTNAME).gb
-FLAME_FRAMES  ?= 910
+FLAME_FRAMES  ?= 1000
 
 flamegraph:
 	$(MAKE) BUILD=profile all

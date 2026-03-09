@@ -38,10 +38,24 @@
 
 #define SRAM_BASE 0xA000u
 
+/* ---- Tile update stack ----
+ * Game logic and cursor restoration push tile changes here instead of
+ * writing VRAM directly.  The VBlank ISR drains up to TILE_DRAIN_LIMIT
+ * entries per frame, keeping all BG-map writes inside the VBlank window. */
+#define TILE_STACK_MAX 32
+#define TILE_DRAIN_LIMIT 1
+
+typedef struct tile_entry {
+    uint16_t pc;
+    uint8_t tile;
+} tile_entry_t;
+
 typedef struct sram_layout {
     game_t game;
     input_t input;
     cursor_t cursor;
+    uint8_t tile_stack_top;
+    tile_entry_t tile_stack[TILE_STACK_MAX];
     uint16_t flood_deque[BOARD_POSITIONS];
     uint8_t flood_visited[BOARD_CELLS];
 } sram_layout_t;
@@ -51,6 +65,10 @@ _Static_assert(sizeof(sram_layout_t) <= 0x2000u, "SRAM overflow");
 #define game_state ((game_t *)(SRAM_BASE + offsetof(sram_layout_t, game)))
 #define game_input ((input_t *)(SRAM_BASE + offsetof(sram_layout_t, input)))
 #define game_cursor ((cursor_t *)(SRAM_BASE + offsetof(sram_layout_t, cursor)))
+#define tile_stack_top                                                         \
+    (*(volatile uint8_t *)(SRAM_BASE + offsetof(sram_layout_t, tile_stack_top)))
+#define tile_stack                                                             \
+    ((tile_entry_t *)(SRAM_BASE + offsetof(sram_layout_t, tile_stack)))
 #define flood_deque                                                            \
     ((uint16_t *)(SRAM_BASE + offsetof(sram_layout_t, flood_deque)))
 #define flood_visited                                                          \
@@ -193,8 +211,13 @@ enum {
 
 /* Write one BG-map tile at packed coordinate `pc` without disabling
  * interrupts.  `pc` is a tile-map offset: (row << COORD_SHIFT) | col.
- * Waits for VRAM-accessible mode then stores a single byte. */
+ * Waits for VRAM-accessible mode then stores a single byte.
+ * Used only during init (display off) by board_redraw. */
 void vram_set_tile(uint16_t pc, uint8_t tile);
+
+/* Push a tile update onto the deferred stack.  The VBlank ISR drains
+ * entries to VRAM each frame.  Busy-waits if the stack is full. */
+void tile_push(uint16_t pc, uint8_t tile);
 
 /* Return the board-surface tile index for an empty intersection. */
 uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h);
