@@ -48,11 +48,11 @@ LCCFLAGS = -Wm-yt0x1B -Wm-ya1
 FLAME_FPM ?= 5
 
 ifeq ($(BUILD),release)
-	LCCFLAGS += -DNDEBUG -Wf--opt-code-speed
+	LCCFLAGS += -DNDEBUG -Wf--opt-code-speed -Wf--max-allocs-per-node150000
 else ifeq ($(BUILD),relwithdebinfo)
-	LCCFLAGS += -debug -DNDEBUG -Wf--opt-code-speed
+	LCCFLAGS += -debug -DNDEBUG -Wf--opt-code-speed -Wf--max-allocs-per-node150000
 else ifeq ($(BUILD),profile)
-	LCCFLAGS += -debug -DNDEBUG -Wf--opt-code-speed \
+	LCCFLAGS += -debug -DNDEBUG -Wf--opt-code-speed -Wf--max-allocs-per-node150000 \
 	            -DDEMO_MODE -DDEMO_FRAME_INTERVAL=$(FLAME_FPM)
 else
 	LCCFLAGS += -debug -v
