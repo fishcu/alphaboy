@@ -80,19 +80,6 @@ void vram_set_tile(uint16_t pc, uint8_t tile) {
     *addr = tile;
 }
 
-/* Push a tile update onto the deferred stack.  Busy-waits if the
- * stack is full (the VBlank ISR will drain entries to make room). */
-void tile_push(uint16_t pc, uint8_t tile) {
-    while (tile_stack_top >= TILE_STACK_MAX) {
-    }
-    CRITICAL {
-        uint8_t top = tile_stack_top;
-        tile_stack[top].pc = pc;
-        tile_stack[top].tile = tile;
-        tile_stack_top = top + 1;
-    }
-}
-
 /* Full board redraw — used only at init (display off, fast).
  * Draws the decorative frame and all intersections.
  * During gameplay, game_play_move updates tiles incrementally. */
@@ -235,16 +222,18 @@ static void vbl_isr(void) NONBANKED {
     DIV_REG = 0;
     IF_REG &= ~TIM_IFLAG;
 
-    /* Drain tile stack — VRAM is freely accessible during VBlank. */
-    uint8_t top = tile_stack_top;
+    /* Drain tile queue — VRAM is freely accessible during VBlank.
+     * Only committed entries are visible; speculative (uncommitted)
+     * pushes from an in-progress move are not touched. */
+    uint8_t h = tile_queue_head;
+    const uint8_t com = tile_queue_committed;
     uint8_t n = TILE_DRAIN_LIMIT;
-    while (top > 0 && n > 0) {
-        top--;
-        *(volatile uint8_t *)(0x9800u + tile_stack[top].pc) =
-            tile_stack[top].tile;
+    while (h != com && n > 0) {
+        *(volatile uint8_t *)(0x9800u + tile_queue[h].pc) = tile_queue[h].tile;
+        h = (h + 1) % TILE_QUEUE_MAX;
         n--;
     }
-    tile_stack_top = top;
+    tile_queue_head = h;
 
     /* Ghost stone flicker — written after drain so it takes visual
      * priority when the cursor overlaps a pending game-tile update. */
@@ -283,7 +272,9 @@ void main(void) {
     /* Enable SRAM. */
     ENABLE_RAM;
 
-    tile_stack_top = 0;
+    tile_queue_head = 0;
+    tile_queue_tail = 0;
+    tile_queue_committed = 0;
 
     /* Initialize and draw the board. */
     game_t *const g = game_state;

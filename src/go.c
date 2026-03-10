@@ -184,6 +184,7 @@ void game_play_pass(game_t *g, color_t color) {
         tile_push(g->ko, surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
                                       g->width, g->height));
     }
+    tile_commit();
     g->ko = COORD_PASS;
     if (g->move_count >= g->history_base + HISTORY_MAX)
         g->history_base++;
@@ -204,6 +205,34 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
 
     uint8_t move_hi = (uint8_t)((coord >> 8) | (color << (MOVE_COLOR_BIT - 8)));
     uint8_t captured_total = 0;
+
+    /* ---- Speculative tile pushes (uncommitted) ----
+     * Pushed before captures so the FIFO drain shows cosmetic updates
+     * first.  On suicide the queue is rewound and none reach VRAM. */
+
+    /* Un-mark previous last-played stone. */
+    if (g->move_count > g->history_base) {
+        const move_t prev = g->history[(g->move_count - 1) % HISTORY_MAX];
+        const uint16_t pc = MOVE_COORD(prev);
+        if (pc != COORD_PASS) {
+            const uint8_t prev_color = g->board[pc];
+            if (prev_color == COLOR_BLACK)
+                tile_push(pc, TILE_STONE_B);
+            else if (prev_color == COLOR_WHITE)
+                tile_push(pc, TILE_STONE_W);
+        }
+    }
+
+    /* Clear previous ko marker tile. */
+    if (g->ko != COORD_PASS) {
+        tile_push(g->ko, surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
+                                      g->width, g->height));
+    }
+
+    /* Mark new last-played stone. */
+    tile_push(coord, (color == COLOR_BLACK) ? TILE_LAST_B : TILE_LAST_W);
+
+    /* ---- Capture loop ---- */
 
     uint16_t nb;
     uint8_t dir_bit;
@@ -233,20 +262,17 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
         }
     });
 
+    /* ---- Suicide check ---- */
+
     if (captured_total == 0 && g->board[coord + DIR_UP] != COLOR_EMPTY &&
         g->board[coord + DIR_DOWN] != COLOR_EMPTY &&
         g->board[coord + DIR_LEFT] != COLOR_EMPTY &&
         g->board[coord + DIR_RIGHT] != COLOR_EMPTY) {
         if (!group_has_liberty(g, coord, own_color)) {
+            tile_rewind();
             g->board[coord] = COLOR_EMPTY;
             return MOVE_SUICIDAL;
         }
-    }
-
-    /* Clear previous ko marker tile. */
-    if (g->ko != COORD_PASS) {
-        tile_push(g->ko, surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
-                                      g->width, g->height));
     }
 
     /* Ko detection: exactly one single-stone group captured, the
@@ -273,20 +299,7 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
     }
 ko_done:;
 
-    /* Un-mark previous last-played stone. */
-    if (g->move_count > g->history_base) {
-        const move_t prev = g->history[(g->move_count - 1) % HISTORY_MAX];
-        const uint16_t pc = MOVE_COORD(prev);
-        if (pc != COORD_PASS) {
-            const uint8_t prev_color = g->board[pc];
-            if (prev_color == COLOR_BLACK)
-                tile_push(pc, TILE_STONE_B);
-            else if (prev_color == COLOR_WHITE)
-                tile_push(pc, TILE_STONE_W);
-        }
-    }
-
-    tile_push(coord, (color == COLOR_BLACK) ? TILE_LAST_B : TILE_LAST_W);
+    tile_commit();
     if (g->move_count >= g->history_base + HISTORY_MAX)
         g->history_base++;
     /* Reassemble the full move_t from the 8-bit high byte (flags + coord
@@ -381,6 +394,7 @@ undo_result_t game_undo(game_t *g) {
         }
     }
 
+    tile_commit();
     return UNDO_OK;
 }
 

@@ -100,6 +100,7 @@ void cursor_update(cursor_t *c, const input_t *inp, const game_t *g) {
         recompute_ghost(c, g);
         c->dirty = 0;
     }
+    tile_commit();
 
     /* Smooth tracking toward target pixel position. */
     const uint16_t tx = target_x(c->col, g->width);

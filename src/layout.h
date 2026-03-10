@@ -38,11 +38,13 @@
 
 #define SRAM_BASE 0xA000u
 
-/* ---- Tile update stack ----
+/* ---- Tile update queue ----
  * Game logic and cursor restoration push tile changes here instead of
  * writing VRAM directly.  The VBlank ISR drains up to TILE_DRAIN_LIMIT
- * entries per frame, keeping all BG-map writes inside the VBlank window. */
-#define TILE_STACK_MAX 32
+ * committed entries per frame (FIFO), keeping all BG-map writes inside
+ * the VBlank window.  Uncommitted entries are invisible to the ISR;
+ * tile_commit() makes them drainable, tile_rewind() discards them. */
+#define TILE_QUEUE_MAX 32u /* must be power of 2 */
 #define TILE_DRAIN_LIMIT 1
 
 typedef struct tile_entry {
@@ -54,8 +56,10 @@ typedef struct sram_layout {
     game_t game;
     input_t input;
     cursor_t cursor;
-    uint8_t tile_stack_top;
-    tile_entry_t tile_stack[TILE_STACK_MAX];
+    uint8_t tile_queue_head;
+    uint8_t tile_queue_tail;
+    uint8_t tile_queue_committed;
+    tile_entry_t tile_queue[TILE_QUEUE_MAX];
     uint16_t flood_deque[BOARD_POSITIONS];
     uint8_t flood_visited[BOARD_CELLS];
 } sram_layout_t;
@@ -65,10 +69,15 @@ _Static_assert(sizeof(sram_layout_t) <= 0x2000u, "SRAM overflow");
 #define game_state ((game_t *)(SRAM_BASE + offsetof(sram_layout_t, game)))
 #define game_input ((input_t *)(SRAM_BASE + offsetof(sram_layout_t, input)))
 #define game_cursor ((cursor_t *)(SRAM_BASE + offsetof(sram_layout_t, cursor)))
-#define tile_stack_top                                                         \
-    (*(volatile uint8_t *)(SRAM_BASE + offsetof(sram_layout_t, tile_stack_top)))
-#define tile_stack                                                             \
-    ((tile_entry_t *)(SRAM_BASE + offsetof(sram_layout_t, tile_stack)))
+#define tile_queue_head                                                        \
+    (*(volatile uint8_t *)(SRAM_BASE +                                         \
+                           offsetof(sram_layout_t, tile_queue_head)))
+#define tile_queue_tail                                                        \
+    (*(uint8_t *)(SRAM_BASE + offsetof(sram_layout_t, tile_queue_tail)))
+#define tile_queue_committed                                                   \
+    (*(uint8_t *)(SRAM_BASE + offsetof(sram_layout_t, tile_queue_committed)))
+#define tile_queue                                                             \
+    ((tile_entry_t *)(SRAM_BASE + offsetof(sram_layout_t, tile_queue)))
 #define flood_deque                                                            \
     ((uint16_t *)(SRAM_BASE + offsetof(sram_layout_t, flood_deque)))
 #define flood_visited                                                          \
@@ -215,9 +224,25 @@ enum {
  * Used only during init (display off) by board_redraw. */
 void vram_set_tile(uint16_t pc, uint8_t tile);
 
-/* Push a tile update onto the deferred stack.  The VBlank ISR drains
- * entries to VRAM each frame.  Busy-waits if the stack is full. */
-void tile_push(uint16_t pc, uint8_t tile);
+/* Push a tile update onto the deferred queue.  The VBlank ISR drains
+ * committed entries to VRAM each frame.  Busy-waits if the queue is full.
+ * No critical section needed: single-producer single-consumer ring
+ * buffer — the ISR only touches head, the producer only touches tail. */
+static inline void tile_push(uint16_t pc, uint8_t tile) {
+    const uint8_t t = tile_queue_tail;
+    const uint8_t next = (t + 1) % TILE_QUEUE_MAX;
+    while (next == tile_queue_head) {
+    }
+    tile_queue[t].pc = pc;
+    tile_queue[t].tile = tile;
+    tile_queue_tail = next;
+}
+
+/* Make all queued tile pushes visible to the VBlank ISR for draining. */
+static inline void tile_commit(void) { tile_queue_committed = tile_queue_tail; }
+
+/* Discard all uncommitted tile pushes (rewind tail to committed). */
+static inline void tile_rewind(void) { tile_queue_tail = tile_queue_committed; }
 
 /* Return the board-surface tile index for an empty intersection. */
 uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h);

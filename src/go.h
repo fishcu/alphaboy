@@ -84,7 +84,7 @@ typedef uint16_t move_t;
 #define MOVE_COLOR(m) ((m) >> MOVE_COLOR_BIT)
 
 /* Maximum number of moves stored in history. */
-#define HISTORY_MAX 512
+#define HISTORY_MAX 512u
 
 /* --- Coordinate extraction --- */
 
