@@ -235,15 +235,6 @@ static void vbl_isr(void) NONBANKED {
     }
     tile_queue_head = h;
 
-    /* Ghost stone flicker — written after drain so it takes visual
-     * priority when the cursor overlaps a pending game-tile update. */
-    const uint8_t ghost = game_cursor->ghost_tile;
-    if (ghost) {
-        const uint16_t pc = BOARD_COORD(game_cursor->col, game_cursor->row);
-        *(volatile uint8_t *)(0x9800u + pc) =
-            (frame_count & 1) ? ghost : game_cursor->surface_cache;
-    }
-
     frame_count++;
 }
 
@@ -261,7 +252,7 @@ void main(void) {
      * Shades: 0=white, 1=light, 2=dark, 3=black.
      * Sprite index 0 is always transparent regardless of OBP value. */
     BGP_REG = DMG_PAL(0, 1, 2, 3);
-    OBP0_REG = DMG_PAL(0, 0, 2, 3);
+    OBP0_REG = DMG_PAL(0, 0, 2, 3); /* cursor */
 
     /* Load tiles to 0x8000 (shared BG + Sprite region). */
     set_tile_data(0, tiles_TILE_COUNT, tiles_tiles, TILE_DATA_BASE);
@@ -324,7 +315,6 @@ void main(void) {
     set_interrupts(VBL_IFLAG | TIM_IFLAG);
 
     cursor_init(game_cursor, g->width / 2, g->height / 2, g);
-    cursor_draw(game_cursor);
 
     SHOW_BKG;
     SHOW_SPRITES;
@@ -345,7 +335,6 @@ void main(void) {
             const move_legality_t result = game_play_move(g, coord, color);
 
             if (result == MOVE_LEGAL) {
-                cursor_invalidate(game_cursor);
 #ifndef NDEBUG
                 EMU_printf("Move %u: %s at (%hu,%hu)\n",
                            (unsigned)g->move_count,
@@ -367,7 +356,6 @@ void main(void) {
 
         if (game_input->pressed & J_B) {
             if (game_undo(g) == UNDO_OK) {
-                cursor_invalidate(game_cursor);
 #ifndef NDEBUG
                 EMU_printf("Undo → move_count=%u\n", (unsigned)g->move_count);
                 game_debug_print(g);
@@ -376,7 +364,6 @@ void main(void) {
         }
 
         cursor_update(game_cursor, game_input, g);
-        cursor_draw(game_cursor);
 #endif /* DEMO_MODE */
     }
 }

@@ -178,6 +178,10 @@ enum {
     TILE_CURSOR,
     TILE_CURSOR2,
 
+    /* Ghost stone sprites (3-color + transparency). */
+    TILE_SPR_STONE_B,
+    TILE_SPR_STONE_W,
+
     TILE_COUNT
 };
 
@@ -213,6 +217,7 @@ enum {
 #define CURSOR_SPR_UR 1
 #define CURSOR_SPR_LL 2
 #define CURSOR_SPR_LR 3
+#define GHOST_SPR 4
 
 /* ------------------------------------------------------------------ */
 /*  Display helpers (defined in main.c)                               */
