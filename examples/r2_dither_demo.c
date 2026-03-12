@@ -1,10 +1,10 @@
 /*
  * R2 quasirandom dither dissolve demo.
  *
- * A 16x16 mushroom sprite dissolves in and out using the R2
- * low-discrepancy sequence.  Head/tail pointers walk a position
- * LUT; DX/DY offsets shift the pattern each wrap to break the
- * 256-step period into a much longer visual cycle.
+ * A 16x16 mushroom sprite dissolves in and out using the R2 low-discrepancy
+ * sequence.  Head/tail pointers traverse a position LUT with some distance
+ * between them, clearing and restoring pixels. An offset shifts the pattern
+ * each wrap to break the 256-step period into a much longer visual cycle.
  *
  * Build (GBDK-2020):
  *   lcc -DNDEBUG -Wf--opt-code-speed -o r2_dither_demo.gb r2_dither_demo.c
@@ -13,6 +13,10 @@
 #include <gb/gb.h>
 #include <gb/hardware.h>
 #include <stdint.h>
+
+#define SPR_VRAM ((uint8_t *)0x8000)
+
+#define WRAP_STEP 213 /* DY * 16 + DX with DX=5, DY=13 */
 
 static const uint8_t mushroom_tiles[64] = {
     0x07, 0x07, 0x1E, 0x19, 0x3E, 0x21, 0x7C, 0x43, 0x79, 0x46, 0x83,
@@ -56,44 +60,39 @@ static const uint8_t pos_lut[256] = {
     0xC9, 0x07, 0xD1, 0x1F,
 };
 
-/* Linear offset added each time head/tail wraps around the 256-entry LUT,
- * breaking the short 256-step period.  Must be odd (coprime with 256). */
-#define WRAP_STEP 213 /* DY * 16 + DX with DX=5, DY=13 */
-
 static const uint8_t bit_mask[8] = {0x80, 0x40, 0x20, 0x10,
                                     0x08, 0x04, 0x02, 0x01};
 
 static uint8_t head, tail; /* LUT indices where pixels are hidden/restored */
-static uint8_t head_off;   /* cumulative spatial shift for head */
-static uint8_t tail_off;   /* cumulative spatial shift for tail */
-static uint8_t spr_x = 72; /* (160 - 16) / 2 */
-static uint8_t spr_y = 64; /* (144 - 16) / 2 */
-static uint8_t speed = 1;  /* frames per dissolve step */
-static uint8_t transparency = 32; /* 0 = opaque .. 255 = invisible */
+static uint8_t head_offset;
+static uint8_t tail_offset;
+static uint8_t speed = 4;
+static uint8_t transparency = 64; /* 0 = opaque .. 255 = invisible */
+
+static uint8_t spr_x = 72, spr_y = 64;
 
 static void vbl_callback(void) NONBANKED {
     for (uint8_t n = speed; n--;) {
         uint8_t idx, off, mask;
 
-        idx = pos_lut[tail] + tail_off;
-        off = (idx >> 3) << 1;
+        idx = pos_lut[tail] + tail_offset;
+        off = (idx >> 2) & 0x3E;
         mask = bit_mask[idx & 7];
-        _VRAM8000[off] =
-            (_VRAM8000[off] & ~mask) | (mushroom_tiles[off] & mask);
-        _VRAM8000[off + 1] =
-            (_VRAM8000[off + 1] & ~mask) | (mushroom_tiles[off + 1] & mask);
+        SPR_VRAM[off] ^= (SPR_VRAM[off] ^ mushroom_tiles[off]) & mask;
+        SPR_VRAM[off + 1] ^=
+            (SPR_VRAM[off + 1] ^ mushroom_tiles[off + 1]) & mask;
         tail++;
         if (tail == 0)
-            tail_off += WRAP_STEP;
+            tail_offset += WRAP_STEP;
 
-        idx = pos_lut[head] + head_off;
-        off = (idx >> 3) << 1;
+        idx = pos_lut[head] + head_offset;
+        off = (idx >> 2) & 0x3E;
         mask = bit_mask[idx & 7];
-        _VRAM8000[off] &= ~mask;
-        _VRAM8000[off + 1] &= ~mask;
+        SPR_VRAM[off] &= ~mask;
+        SPR_VRAM[off + 1] &= ~mask;
         head++;
         if (head == 0)
-            head_off += WRAP_STEP;
+            head_offset += WRAP_STEP;
     }
 }
 
@@ -120,7 +119,6 @@ void main(void) {
         set_bkg_tiles(0, y, 32, 1, row);
     }
 
-    /* Sprite tiles and OAM */
     set_sprite_data(0, 4, mushroom_tiles);
     for (uint8_t i = 0; i < 4; i++)
         set_sprite_tile(i, i);
