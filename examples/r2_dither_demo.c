@@ -124,11 +124,17 @@ void main(void) {
         set_sprite_tile(i, i);
     position_sprites();
 
+    refresh_OAM();
+    DISABLE_OAM_DMA;
+
     /* Dissolve pointers: tail=0, head=transparency; the gap converges
        within 256 frames without explicit pre-clearing. */
     head = transparency;
 
-    CRITICAL { add_VBL(vbl_callback); }
+    CRITICAL {
+        add_VBL(vbl_callback);
+        add_VBL(nowait_int_handler);
+    }
 
     SHOW_BKG;
     SHOW_SPRITES;
