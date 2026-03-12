@@ -338,7 +338,7 @@ def animate(
 
 if __name__ == "__main__":
     dither = build_dither_array()
-    plot_dither(dither)
+    # plot_dither(dither)
 
     sprite = build_sprite()
 
