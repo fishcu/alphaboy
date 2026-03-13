@@ -1,5 +1,6 @@
 /*
  * R2 quasirandom dither dissolve demo.
+ * https://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
  *
  * A 16x16 mushroom sprite dissolves in and out using the R2 low-discrepancy
  * sequence.  Head/tail pointers traverse a position LUT with some distance
@@ -116,78 +117,92 @@ static uint8_t spr_x = 72, spr_y = 64;
 static uint8_t spr_buf[64];
 
 // #define FLIP_RESTORE /* XOR toggle vs selective copy for tail (restore) */
-#define FLIP_CLEAR /* XOR toggle vs AND ~mask for head (clear) */
+// #define FLIP_CLEAR /* XOR toggle vs AND ~mask for head (clear) */
 
 static void update_sprite_buf(void) {
     if (transparency < 128) {
         for (uint8_t n = speed; n--;) {
+            uint8_t gap = head - tail;
             uint8_t idx, off, mask;
 
-            /* tail: restore pixel */
-            idx = pos_lut[tail] + tail_offset;
-            off = (idx >> 2) & 0x3E;
-            mask = bit_mask[idx & 7];
-#ifdef FLIP_RESTORE
-            spr_buf[off] ^= mushroom_tiles[off] & mask;
-            spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
-#else
-            spr_buf[off] ^= (spr_buf[off] ^ mushroom_tiles[off]) & mask;
-            spr_buf[off + 1] ^=
-                (spr_buf[off + 1] ^ mushroom_tiles[off + 1]) & mask;
-#endif
-            tail++;
-            if (tail == 0)
-                tail_offset += WRAP_STEP;
+            if (transparency == 0 && gap == 0)
+                break;
 
-            /* head: clear pixel */
-            idx = pos_lut[head] + head_offset;
-            off = (idx >> 2) & 0x3E;
-            mask = bit_mask[idx & 7];
-#ifdef FLIP_CLEAR
-            spr_buf[off] ^= mushroom_tiles[off] & mask;
-            spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
+            if (gap >= transparency) {
+                /* tail: restore pixel */
+                idx = pos_lut[tail] + tail_offset;
+                off = (idx >> 2) & 0x3E;
+                mask = bit_mask[idx & 7];
+#ifdef FLIP_RESTORE
+                spr_buf[off] ^= mushroom_tiles[off] & mask;
+                spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
 #else
-            spr_buf[off] &= ~mask;
-            spr_buf[off + 1] &= ~mask;
+                spr_buf[off] ^= (spr_buf[off] ^ mushroom_tiles[off]) & mask;
+                spr_buf[off + 1] ^=
+                    (spr_buf[off + 1] ^ mushroom_tiles[off + 1]) & mask;
 #endif
-            head++;
-            if (head == 0)
-                head_offset += WRAP_STEP;
+                tail++;
+                if (tail == 0)
+                    tail_offset += WRAP_STEP;
+            }
+
+            if (gap <= transparency) {
+                /* head: clear pixel */
+                idx = pos_lut[head] + head_offset;
+                off = (idx >> 2) & 0x3E;
+                mask = bit_mask[idx & 7];
+#ifdef FLIP_CLEAR
+                spr_buf[off] ^= mushroom_tiles[off] & mask;
+                spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
+#else
+                spr_buf[off] &= ~mask;
+                spr_buf[off + 1] &= ~mask;
+#endif
+                head++;
+                if (head == 0)
+                    head_offset += WRAP_STEP;
+            }
         }
     } else {
+        uint8_t target_gap = (uint8_t)(256u - transparency);
         for (uint8_t n = speed; n--;) {
+            uint8_t gap = head - tail;
             uint8_t idx, off, mask;
 
-            /* tail: clear pixel (inverted) */
-            idx = pos_lut[tail] + tail_offset;
-            off = (idx >> 2) & 0x3E;
-            mask = bit_mask[idx & 7];
+            if (gap >= target_gap) {
+                /* tail: clear pixel (inverted) */
+                idx = pos_lut[tail] + tail_offset;
+                off = (idx >> 2) & 0x3E;
+                mask = bit_mask[idx & 7];
 #ifdef FLIP_CLEAR
-            spr_buf[off] ^= mushroom_tiles[off] & mask;
-            spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
+                spr_buf[off] ^= mushroom_tiles[off] & mask;
+                spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
 #else
-            spr_buf[off] &= ~mask;
-            spr_buf[off + 1] &= ~mask;
+                spr_buf[off] &= ~mask;
+                spr_buf[off + 1] &= ~mask;
 #endif
-            tail++;
-            if (tail == 0)
-                tail_offset += WRAP_STEP;
+                tail++;
+                if (tail == 0)
+                    tail_offset += WRAP_STEP;
+            }
 
-            /* head: restore pixel (inverted) */
-            idx = pos_lut[head] + head_offset;
-            off = (idx >> 2) & 0x3E;
-            mask = bit_mask[idx & 7];
+            if (gap <= target_gap) {
+                /* head: restore pixel (inverted) */
+                idx = pos_lut[head] + head_offset;
+                off = (idx >> 2) & 0x3E;
+                mask = bit_mask[idx & 7];
 #ifdef FLIP_RESTORE
-            spr_buf[off] ^= mushroom_tiles[off] & mask;
-            spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
+                spr_buf[off] ^= mushroom_tiles[off] & mask;
+                spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
 #else
-            spr_buf[off] ^= (spr_buf[off] ^ mushroom_tiles[off]) & mask;
-            spr_buf[off + 1] ^=
-                (spr_buf[off + 1] ^ mushroom_tiles[off + 1]) & mask;
+                spr_buf[off] ^= (spr_buf[off] ^ mushroom_tiles[off]) & mask;
+                spr_buf[off + 1] ^=
+                    (spr_buf[off + 1] ^ mushroom_tiles[off + 1]) & mask;
 #endif
-            head++;
-            if (head == 0)
-                head_offset += WRAP_STEP;
+                head++;
+                if (head == 0)
+                    head_offset += WRAP_STEP;
+            }
         }
     }
 }
@@ -226,7 +241,7 @@ static void print_status(void) {
     put_u8_pad3(speed);
 }
 
-static void sync_transparency(void) {
+static void init_transparency(void) {
     head_offset = 0;
     tail_offset = 0;
     tail = 0;
@@ -262,7 +277,7 @@ void main(void) {
     BGP_REG = DMG_PALETTE(0, 1, 2, 3);
     OBP0_REG = DMG_PALETTE(0, 1, 2, 3);
 
-    sync_transparency();
+    init_transparency();
     set_sprite_data(SPR_TILE_BASE, 4, spr_buf);
     for (uint8_t i = 0; i < 4; i++)
         set_sprite_tile(i, SPR_TILE_BASE + i);

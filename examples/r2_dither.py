@@ -1,4 +1,5 @@
 """R2 quasirandom dither: pattern generation + animated dissolve on a sprite."""
+""" https://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/ """
 
 import matplotlib
 matplotlib.use("Agg")
