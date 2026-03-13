@@ -87,53 +87,55 @@ __at(0xC100) uint8_t _spr_buf_mem[64];
 #define spr_buf ((uint8_t *)0xC100u)
 
 /* Head/tail pointers chase through R2 LUT; gap between them == transparency.
- * When transparency >= 128 the roles of clear/restore invert. */
+ * When transparency >= 128, swap head/tail so the same loop body handles
+ * both halves. */
 static void update_sprite_buf(void) {
-    if (transparency < 128) {
-        for (uint8_t n = speed; n--;) {
-            uint8_t gap = head - tail;
-            if (gap <= transparency) {
-                uint8_t idx = pos_lut[head] + head_off;
-                uint8_t off = (idx >> 2) & 0x3E;
-                uint8_t m = ~bit_mask[idx & 7];
-                spr_buf[off] &= m;
-                spr_buf[off + 1] &= m;
-                if (++head == 0)
-                    head_off += WRAP_STEP;
-            }
-            if (gap >= transparency) {
-                uint8_t idx = pos_lut[tail] + tail_off;
-                uint8_t off = (idx >> 2) & 0x3E;
-                uint8_t m = bit_mask[idx & 7];
-                spr_buf[off] ^= mushroom[off] & m;
-                spr_buf[off + 1] ^= mushroom[off + 1] & m;
-                if (++tail == 0)
-                    tail_off += WRAP_STEP;
-            }
+    uint8_t t = transparency;
+    uint8_t do_swap = t & 0x80;
+
+    if (do_swap) {
+        if (head == tail)
+            /* Handle corner case where head and tail are the same, which
+             * requires advancing head by one period */
+            if (++head == 0)
+                head_off += WRAP_STEP;
+        uint8_t tmp = head;
+        head = tail;
+        tail = tmp;
+        tmp = head_off;
+        head_off = tail_off;
+        tail_off = tmp;
+    }
+
+    for (uint8_t n = speed; n--;) {
+        uint8_t gap = head - tail;
+        if (gap <= t) {
+            uint8_t idx = pos_lut[head] + head_off;
+            uint8_t off = (idx >> 2) & 0x3E;
+            uint8_t m = ~bit_mask[idx & 7];
+            spr_buf[off] &= m;
+            spr_buf[off + 1] &= m;
+            if (++head == 0)
+                head_off += WRAP_STEP;
         }
-    } else {
-        uint8_t neg_t = -transparency;
-        for (uint8_t n = speed; n--;) {
-            uint8_t gap = head - tail;
-            if (gap >= neg_t) {
-                uint8_t idx = pos_lut[tail] + tail_off;
-                uint8_t off = (idx >> 2) & 0x3E;
-                uint8_t m = ~bit_mask[idx & 7];
-                spr_buf[off] &= m;
-                spr_buf[off + 1] &= m;
-                if (++tail == 0)
-                    tail_off += WRAP_STEP;
-            }
-            if (gap <= neg_t) {
-                uint8_t idx = pos_lut[head] + head_off;
-                uint8_t off = (idx >> 2) & 0x3E;
-                uint8_t m = bit_mask[idx & 7];
-                spr_buf[off] ^= mushroom[off] & m;
-                spr_buf[off + 1] ^= mushroom[off + 1] & m;
-                if (++head == 0)
-                    head_off += WRAP_STEP;
-            }
+        if (gap >= t) {
+            uint8_t idx = pos_lut[tail] + tail_off;
+            uint8_t off = (idx >> 2) & 0x3E;
+            uint8_t m = bit_mask[idx & 7];
+            spr_buf[off] ^= mushroom[off] & m;
+            spr_buf[off + 1] ^= mushroom[off + 1] & m;
+            if (++tail == 0)
+                tail_off += WRAP_STEP;
         }
+    }
+
+    if (do_swap) {
+        uint8_t tmp = head;
+        head = tail;
+        tail = tmp;
+        tmp = head_off;
+        head_off = tail_off;
+        tail_off = tmp;
     }
 }
 
