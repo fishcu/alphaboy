@@ -109,15 +109,12 @@ static const uint8_t bit_mask[8] = {0x80, 0x40, 0x20, 0x10,
 static uint8_t head, tail; /* LUT indices where pixels are hidden/restored */
 static uint8_t head_offset;
 static uint8_t tail_offset;
-static uint8_t speed = 3;
-static uint8_t transparency = 17; /* 0 = opaque .. 255 = invisible */
+static uint8_t speed = 4;
+static uint8_t transparency = 64; /* 0 = opaque .. 255 = almost invisible */
 
 static uint8_t spr_x = 72, spr_y = 64;
 
 static uint8_t spr_buf[64];
-
-// #define FLIP_RESTORE /* XOR toggle vs selective copy for tail (restore) */
-// #define FLIP_CLEAR /* XOR toggle vs AND ~mask for head (clear) */
 
 static void update_sprite_buf(void) {
     if (transparency < 128) {
@@ -133,14 +130,8 @@ static void update_sprite_buf(void) {
                 idx = pos_lut[tail] + tail_offset;
                 off = (idx >> 2) & 0x3E;
                 mask = bit_mask[idx & 7];
-#ifdef FLIP_RESTORE
                 spr_buf[off] ^= mushroom_tiles[off] & mask;
                 spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
-#else
-                spr_buf[off] ^= (spr_buf[off] ^ mushroom_tiles[off]) & mask;
-                spr_buf[off + 1] ^=
-                    (spr_buf[off + 1] ^ mushroom_tiles[off + 1]) & mask;
-#endif
                 tail++;
                 if (tail == 0)
                     tail_offset += WRAP_STEP;
@@ -151,13 +142,8 @@ static void update_sprite_buf(void) {
                 idx = pos_lut[head] + head_offset;
                 off = (idx >> 2) & 0x3E;
                 mask = bit_mask[idx & 7];
-#ifdef FLIP_CLEAR
-                spr_buf[off] ^= mushroom_tiles[off] & mask;
-                spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
-#else
                 spr_buf[off] &= ~mask;
                 spr_buf[off + 1] &= ~mask;
-#endif
                 head++;
                 if (head == 0)
                     head_offset += WRAP_STEP;
@@ -174,13 +160,8 @@ static void update_sprite_buf(void) {
                 idx = pos_lut[tail] + tail_offset;
                 off = (idx >> 2) & 0x3E;
                 mask = bit_mask[idx & 7];
-#ifdef FLIP_CLEAR
-                spr_buf[off] ^= mushroom_tiles[off] & mask;
-                spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
-#else
                 spr_buf[off] &= ~mask;
                 spr_buf[off + 1] &= ~mask;
-#endif
                 tail++;
                 if (tail == 0)
                     tail_offset += WRAP_STEP;
@@ -191,14 +172,8 @@ static void update_sprite_buf(void) {
                 idx = pos_lut[head] + head_offset;
                 off = (idx >> 2) & 0x3E;
                 mask = bit_mask[idx & 7];
-#ifdef FLIP_RESTORE
                 spr_buf[off] ^= mushroom_tiles[off] & mask;
                 spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
-#else
-                spr_buf[off] ^= (spr_buf[off] ^ mushroom_tiles[off]) & mask;
-                spr_buf[off + 1] ^=
-                    (spr_buf[off + 1] ^ mushroom_tiles[off + 1]) & mask;
-#endif
                 head++;
                 if (head == 0)
                     head_offset += WRAP_STEP;
