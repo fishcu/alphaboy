@@ -1,13 +1,14 @@
 /*
- * R2 quasirandom dither dissolve demo.
+ * R2 quasirandom dither demo.
  * https://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
  *
- * A 16x16 mushroom sprite dissolves in and out using the R2 low-discrepancy
- * sequence.  Head/tail pointers traverse a position LUT with some distance
- * between them, clearing and restoring pixels. An offset shifts the pattern
- * each wrap to break the 256-step period into a much longer visual cycle.
- * To reduce the effect of pixel collisions, the roles of clear/restore are
- * flipped when transparency >= 128.
+ * Animates a 16x16 sprite dissolving in and out using dithered transparency
+ * driven by the R2 low-discrepancy sequence. Comparing each pixel's R2 value
+ * against a rotating threshold produces a smooth dither animation.
+ *
+ * Rather than re-evaluating every pixel each frame, an inverted R2 lookup
+ * table and head/tail pointers index directly into the pixels that cross the
+ * threshold. A spatial offset applied every 256 steps lengthens the cycle.
  *
  * Build (GBDK-2020):
  *   lcc -DNDEBUG -Wf--opt-code-speed -Wf--max-allocs-per-node50000 -o
@@ -22,7 +23,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define WRAP_STEP 213 /* Spatial offset per epoch: 13*16 + 5 */
+#define WRAP_STEP 213 /* Spatial offset per 256-step cycle: 13*16 + 5 */
 #define MAX_SPEED 64  /* Maximum pixel updates per frame */
 
 #define SPR_TILE 130 /* Sprite tile start index */
@@ -80,11 +81,13 @@ static const uint8_t bg_tiles[32] = {
     0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF,
 };
 
+/* Dithering state */
 static uint8_t head, tail, head_off, tail_off;
-static uint8_t speed = 4, transparency = 64;
-static uint8_t spr_x = 72, spr_y = 64;
 __at(0xC100) uint8_t _spr_buf_mem[64];
 #define spr_buf ((uint8_t *)0xC100u)
+
+static uint8_t speed = 4, transparency = 64;
+static uint8_t spr_x = 72, spr_y = 64;
 
 /* Head/tail pointers chase through R2 LUT; gap between them == transparency.
  * When transparency >= 128, swap head/tail so the same loop body handles
@@ -94,8 +97,8 @@ static void update_sprite_buf(void) {
 
     if (do_swap) {
         if (head == tail)
-            /* Handle corner case where head and tail are the same, which
-             * requires advancing head by one period */
+            /* Advance head by one step so the swapped gap is 255, not 0.
+             * Without this, the clear/restore roles invert at gap 0. */
             if (++head == 0)
                 head_off += WRAP_STEP;
         uint8_t tmp = head;
@@ -154,7 +157,7 @@ static void print_status(void) {
 }
 
 void main(void) {
-    /* Set up all graphics */
+    /* Set up graphics */
     DISPLAY_OFF;
     BGP_REG = OBP0_REG = DMG_PALETTE(0, 1, 2, 3);
 
@@ -186,7 +189,7 @@ void main(void) {
     SHOW_SPRITES;
     DISPLAY_ON;
 
-    /* Set up input state */
+    /* Initialize input state */
     uint8_t cur = 0, rep_timer = 0;
 
     while (1) {
