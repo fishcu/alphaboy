@@ -6,9 +6,12 @@
  * sequence.  Head/tail pointers traverse a position LUT with some distance
  * between them, clearing and restoring pixels. An offset shifts the pattern
  * each wrap to break the 256-step period into a much longer visual cycle.
+ * To reduce the effect of pixel collisions, the roles of clear/restore are
+ * flipped when transparency >= 128.
  *
  * Build (GBDK-2020):
- *   lcc -DNDEBUG -Wf--opt-code-speed -o r2_dither_demo.gb r2_dither_demo.c
+ *   lcc -DNDEBUG -Wf--opt-code-speed -Wf--max-allocs-per-node50000 -o
+ * r2_dither_demo.gb r2_dither_demo.c
  */
 
 #include <gb/gb.h>
@@ -17,6 +20,7 @@
 #include <gbdk/font.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #define WRAP_STEP 213 /* Spatial offset per epoch: 13*16 + 5 */
 #define MAX_SPEED 64  /* Maximum pixel updates per frame */
@@ -75,7 +79,8 @@ static const uint8_t bit_mask[8] = {0x80, 0x40, 0x20, 0x10,
 static uint8_t head, tail, head_off, tail_off;
 static uint8_t speed = 4, transparency = 64;
 static uint8_t spr_x = 72, spr_y = 64;
-static uint8_t spr_buf[64];
+__at(0xC100) uint8_t _spr_buf_mem[64];
+#define spr_buf ((uint8_t *)0xC100u)
 
 /* Head/tail pointers chase through R2 LUT; gap between them == transparency.
  * When transparency >= 128 the roles of clear/restore invert. */
@@ -161,12 +166,9 @@ void main(void) {
 
     print_status();
     gotoxy(0, 1);
-    printf("Hold A+L/R to change");
-    gotoxy(0, 3);
-    printf("Hold A+U/D to change");
-    gotoxy(0, 4);
-    printf("DPAD to move sprites");
+    printf("Hold A+L/R to change\nHold A+U/D to changeDPAD to move sprites");
 
+    memset(spr_buf, 0, 64);
     set_sprite_data(SPR_TILE, 4, spr_buf);
     for (uint8_t i = 0; i < 4; i++)
         set_sprite_tile(i, SPR_TILE + i);
