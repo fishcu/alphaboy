@@ -88,17 +88,6 @@ static void update_sprite_buf(void) {
     if (transparency < 128) {
         for (uint8_t n = speed; n--;) {
             uint8_t gap = head - tail;
-            if (transparency == 0 && gap == 0)
-                break;
-            if (gap >= transparency) {
-                uint8_t idx = pos_lut[tail] + tail_off;
-                uint8_t off = (idx >> 2) & 0x3E;
-                uint8_t m = bit_mask[idx & 7];
-                spr_buf[off] ^= mushroom[off] & m;
-                spr_buf[off + 1] ^= mushroom[off + 1] & m;
-                if (++tail == 0)
-                    tail_off += WRAP_STEP;
-            }
             if (gap <= transparency) {
                 uint8_t idx = pos_lut[head] + head_off;
                 uint8_t off = (idx >> 2) & 0x3E;
@@ -108,11 +97,21 @@ static void update_sprite_buf(void) {
                 if (++head == 0)
                     head_off += WRAP_STEP;
             }
+            if (gap >= transparency) {
+                uint8_t idx = pos_lut[tail] + tail_off;
+                uint8_t off = (idx >> 2) & 0x3E;
+                uint8_t m = bit_mask[idx & 7];
+                spr_buf[off] ^= mushroom[off] & m;
+                spr_buf[off + 1] ^= mushroom[off + 1] & m;
+                if (++tail == 0)
+                    tail_off += WRAP_STEP;
+            }
         }
     } else {
+        uint8_t neg_t = -transparency;
         for (uint8_t n = speed; n--;) {
             uint8_t gap = head - tail;
-            if (gap >= (uint8_t)(256u - transparency)) {
+            if (gap >= neg_t) {
                 uint8_t idx = pos_lut[tail] + tail_off;
                 uint8_t off = (idx >> 2) & 0x3E;
                 uint8_t m = ~bit_mask[idx & 7];
@@ -121,7 +120,7 @@ static void update_sprite_buf(void) {
                 if (++tail == 0)
                     tail_off += WRAP_STEP;
             }
-            if (gap <= (uint8_t)(256u - transparency)) {
+            if (gap <= neg_t) {
                 uint8_t idx = pos_lut[head] + head_off;
                 uint8_t off = (idx >> 2) & 0x3E;
                 uint8_t m = bit_mask[idx & 7];
