@@ -8,16 +8,47 @@
  *
  * Build (GBDK-2020):
  *   lcc -DNDEBUG -Wf--opt-code-speed -o r2_dither_demo.gb r2_dither_demo.c
- * ../src/input.c
  */
 
-#include "../src/input.h"
 #include <gb/gb.h>
 #include <gb/hardware.h>
 #include <gbdk/console.h>
 #include <gbdk/font.h>
 #include <stdint.h>
 #include <stdio.h>
+
+#define INPUT_REPEAT_DELAY 25
+#define INPUT_REPEAT_RATE 4
+#define DPAD_MASK (J_LEFT | J_RIGHT | J_UP | J_DOWN)
+
+typedef struct input {
+    uint8_t current;
+    uint8_t pressed;
+    uint8_t repeated;
+    uint8_t repeat_timer;
+} input_t;
+
+static void input_poll(input_t *inp) {
+    const uint8_t prev = inp->current;
+    inp->current = joypad();
+    inp->pressed = inp->current & ~prev;
+    inp->repeated = 0;
+
+    const uint8_t held = inp->current & DPAD_MASK;
+    const uint8_t prev_held = prev & DPAD_MASK;
+
+    if (held != prev_held) {
+        inp->repeat_timer = 0;
+    } else if (held) {
+        inp->repeat_timer++;
+        if (inp->repeat_timer == INPUT_REPEAT_DELAY) {
+            inp->repeated = held;
+            inp->repeat_timer = INPUT_REPEAT_DELAY - INPUT_REPEAT_RATE;
+        }
+    } else {
+        inp->repeat_timer = 0;
+    }
+}
 
 #define BG_TILE_BASE 128
 #define SPR_TILE_BASE 130
@@ -27,7 +58,7 @@
 #define WRAP_Y 160 /* screen 144 + OAM y-offset 16 */
 
 #define WRAP_STEP 213 /* DY * 16 + DX with DX=5, DY=13 */
-#define MAX_SPEED 3
+#define MAX_SPEED 64
 
 static const uint8_t mushroom_tiles[64] = {
     0x07, 0x07, 0x1E, 0x19, 0x3E, 0x21, 0x7C, 0x43, 0x79, 0x46, 0x83,
@@ -78,14 +109,16 @@ static uint8_t head, tail; /* LUT indices where pixels are hidden/restored */
 static uint8_t head_offset;
 static uint8_t tail_offset;
 static uint8_t speed = 3;
-static uint8_t transparency = 127; /* 0 = opaque .. 255 = invisible */
+static uint8_t transparency = 17; /* 0 = opaque .. 255 = invisible */
 
 static uint8_t spr_x = 72, spr_y = 64;
 
-// #define FLIP_RESTORE /* XOR toggle vs selective copy for tail (restore) */
-// #define FLIP_CLEAR   /* XOR toggle vs AND ~mask for head (clear) */
+static uint8_t spr_buf[64];
 
-static void vbl_callback(void) NONBANKED {
+// #define FLIP_RESTORE /* XOR toggle vs selective copy for tail (restore) */
+#define FLIP_CLEAR /* XOR toggle vs AND ~mask for head (clear) */
+
+static void update_sprite_buf(void) {
     if (transparency < 128) {
         for (uint8_t n = speed; n--;) {
             uint8_t idx, off, mask;
@@ -95,12 +128,12 @@ static void vbl_callback(void) NONBANKED {
             off = (idx >> 2) & 0x3E;
             mask = bit_mask[idx & 7];
 #ifdef FLIP_RESTORE
-            SPR_VRAM[off] ^= mushroom_tiles[off] & mask;
-            SPR_VRAM[off + 1] ^= mushroom_tiles[off + 1] & mask;
+            spr_buf[off] ^= mushroom_tiles[off] & mask;
+            spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
 #else
-            SPR_VRAM[off] ^= (SPR_VRAM[off] ^ mushroom_tiles[off]) & mask;
-            SPR_VRAM[off + 1] ^=
-                (SPR_VRAM[off + 1] ^ mushroom_tiles[off + 1]) & mask;
+            spr_buf[off] ^= (spr_buf[off] ^ mushroom_tiles[off]) & mask;
+            spr_buf[off + 1] ^=
+                (spr_buf[off + 1] ^ mushroom_tiles[off + 1]) & mask;
 #endif
             tail++;
             if (tail == 0)
@@ -111,11 +144,11 @@ static void vbl_callback(void) NONBANKED {
             off = (idx >> 2) & 0x3E;
             mask = bit_mask[idx & 7];
 #ifdef FLIP_CLEAR
-            SPR_VRAM[off] ^= mushroom_tiles[off] & mask;
-            SPR_VRAM[off + 1] ^= mushroom_tiles[off + 1] & mask;
+            spr_buf[off] ^= mushroom_tiles[off] & mask;
+            spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
 #else
-            SPR_VRAM[off] &= ~mask;
-            SPR_VRAM[off + 1] &= ~mask;
+            spr_buf[off] &= ~mask;
+            spr_buf[off + 1] &= ~mask;
 #endif
             head++;
             if (head == 0)
@@ -130,11 +163,11 @@ static void vbl_callback(void) NONBANKED {
             off = (idx >> 2) & 0x3E;
             mask = bit_mask[idx & 7];
 #ifdef FLIP_CLEAR
-            SPR_VRAM[off] ^= mushroom_tiles[off] & mask;
-            SPR_VRAM[off + 1] ^= mushroom_tiles[off + 1] & mask;
+            spr_buf[off] ^= mushroom_tiles[off] & mask;
+            spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
 #else
-            SPR_VRAM[off] &= ~mask;
-            SPR_VRAM[off + 1] &= ~mask;
+            spr_buf[off] &= ~mask;
+            spr_buf[off + 1] &= ~mask;
 #endif
             tail++;
             if (tail == 0)
@@ -145,12 +178,12 @@ static void vbl_callback(void) NONBANKED {
             off = (idx >> 2) & 0x3E;
             mask = bit_mask[idx & 7];
 #ifdef FLIP_RESTORE
-            SPR_VRAM[off] ^= mushroom_tiles[off] & mask;
-            SPR_VRAM[off + 1] ^= mushroom_tiles[off + 1] & mask;
+            spr_buf[off] ^= mushroom_tiles[off] & mask;
+            spr_buf[off + 1] ^= mushroom_tiles[off + 1] & mask;
 #else
-            SPR_VRAM[off] ^= (SPR_VRAM[off] ^ mushroom_tiles[off]) & mask;
-            SPR_VRAM[off + 1] ^=
-                (SPR_VRAM[off + 1] ^ mushroom_tiles[off + 1]) & mask;
+            spr_buf[off] ^= (spr_buf[off] ^ mushroom_tiles[off]) & mask;
+            spr_buf[off + 1] ^=
+                (spr_buf[off + 1] ^ mushroom_tiles[off + 1]) & mask;
 #endif
             head++;
             if (head == 0)
@@ -178,39 +211,47 @@ static void position_sprites(void) {
     move_sprite(3, sx1, sy1);
 }
 
+static void put_u8_pad3(uint8_t v) {
+    putchar(v < 100 ? ' ' : '0' + v / 100);
+    putchar(v < 10 ? ' ' : '0' + v / 10 % 10);
+    putchar('0' + v % 10);
+}
+
 static void print_status(void) {
     gotoxy(0, 0);
-    printf("TRANS:%-3u SPD:%u", (unsigned)transparency, (unsigned)speed);
+    printf("Transparency ");
+    put_u8_pad3(transparency);
+    gotoxy(0, 2);
+    printf("Speed ");
+    put_u8_pad3(speed);
 }
 
 static void sync_transparency(void) {
-    CRITICAL {
-        head_offset = 0;
-        tail_offset = 0;
-        tail = 0;
-        if (transparency >= 128) {
-            uint8_t gap = (uint8_t)(256u - transparency);
-            for (uint8_t i = 0; i < 64; i++)
-                SPR_VRAM[i] = 0;
-            head = gap;
-            for (uint8_t i = 0; i < gap; i++) {
-                uint8_t idx = pos_lut[i];
-                uint8_t off = (idx >> 2) & 0x3E;
-                uint8_t mask = bit_mask[idx & 7];
-                SPR_VRAM[off] |= mushroom_tiles[off] & mask;
-                SPR_VRAM[off + 1] |= mushroom_tiles[off + 1] & mask;
-            }
-        } else {
-            for (uint8_t i = 0; i < 64; i++)
-                SPR_VRAM[i] = mushroom_tiles[i];
-            head = transparency;
-            for (uint8_t i = 0; i < transparency; i++) {
-                uint8_t idx = pos_lut[i];
-                uint8_t off = (idx >> 2) & 0x3E;
-                uint8_t mask = bit_mask[idx & 7];
-                SPR_VRAM[off] &= ~mask;
-                SPR_VRAM[off + 1] &= ~mask;
-            }
+    head_offset = 0;
+    tail_offset = 0;
+    tail = 0;
+    if (transparency >= 128) {
+        uint8_t gap = (uint8_t)(256u - transparency);
+        for (uint8_t i = 0; i < 64; i++)
+            spr_buf[i] = 0;
+        head = gap;
+        for (uint8_t i = 0; i < gap; i++) {
+            uint8_t idx = pos_lut[i];
+            uint8_t off = (idx >> 2) & 0x3E;
+            uint8_t mask = bit_mask[idx & 7];
+            spr_buf[off] |= mushroom_tiles[off] & mask;
+            spr_buf[off + 1] |= mushroom_tiles[off + 1] & mask;
+        }
+    } else {
+        for (uint8_t i = 0; i < 64; i++)
+            spr_buf[i] = mushroom_tiles[i];
+        head = transparency;
+        for (uint8_t i = 0; i < transparency; i++) {
+            uint8_t idx = pos_lut[i];
+            uint8_t off = (idx >> 2) & 0x3E;
+            uint8_t mask = bit_mask[idx & 7];
+            spr_buf[off] &= ~mask;
+            spr_buf[off + 1] &= ~mask;
         }
     }
 }
@@ -221,79 +262,84 @@ void main(void) {
     BGP_REG = DMG_PALETTE(0, 1, 2, 3);
     OBP0_REG = DMG_PALETTE(0, 1, 2, 3);
 
-    set_sprite_data(SPR_TILE_BASE, 4, mushroom_tiles);
+    sync_transparency();
+    set_sprite_data(SPR_TILE_BASE, 4, spr_buf);
     for (uint8_t i = 0; i < 4; i++)
         set_sprite_tile(i, SPR_TILE_BASE + i);
     position_sprites();
 
-    /* Pre-set the initial state so the sliding window starts correct. */
-    if (transparency >= 128) {
-        /* Inverted: start cleared, restore the small visible window. */
-        uint8_t gap = (uint8_t)(256u - transparency);
-        for (uint8_t i = 0; i < 64; i++)
-            SPR_VRAM[i] = 0;
-        head = gap;
-        for (uint8_t i = 0; i < gap; i++) {
-            uint8_t idx = pos_lut[i];
-            uint8_t off = (idx >> 2) & 0x3E;
-            uint8_t mask = bit_mask[idx & 7];
-            SPR_VRAM[off] |= mushroom_tiles[off] & mask;
-            SPR_VRAM[off + 1] |= mushroom_tiles[off + 1] & mask;
-        }
-    } else {
-        /* Normal: start opaque, clear the transparent window. */
-        head = transparency;
-        for (uint8_t i = 0; i < transparency; i++) {
-            uint8_t idx = pos_lut[i];
-            uint8_t off = (idx >> 2) & 0x3E;
-            uint8_t mask = bit_mask[idx & 7];
-            SPR_VRAM[off] &= ~mask;
-            SPR_VRAM[off + 1] &= ~mask;
-        }
-    }
-
     font_init();
-    font_load(font_min);
+    font_load(font_spect);
     cls();
 
     set_bkg_data(BG_TILE_BASE, 2, bg_tiles);
     uint8_t row[32];
-    for (uint8_t y = 3; y < 32; y++) {
+    for (uint8_t y = 0; y < 32; y++) {
         for (uint8_t x = 0; x < 32; x++)
             row[x] = BG_TILE_BASE + ((x + y) & 1);
         set_bkg_tiles(0, y, 32, 1, row);
     }
 
     print_status();
-
-    CRITICAL {
-        add_VBL(vbl_callback);
-        add_VBL(nowait_int_handler);
-    }
+    gotoxy(0, 1);
+    printf("Hold A+L/R to change");
+    gotoxy(0, 3);
+    printf("Hold A+U/D to change");
+    gotoxy(0, 4);
+    printf("DPAD to move sprites");
 
     SHOW_BKG;
     SHOW_SPRITES;
     DISPLAY_ON;
 
+    input_t inp = {0};
+
     while (1) {
         vsync();
+        set_sprite_data(SPR_TILE_BASE, 4, spr_buf);
+        update_sprite_buf();
+        input_poll(&inp);
 
-        uint8_t keys = joypad();
-        if (keys & J_UP)
-            spr_y = (spr_y == 0) ? WRAP_Y - 1 : spr_y - 1;
-        if (keys & J_DOWN) {
-            spr_y++;
-            if (spr_y >= WRAP_Y)
-                spr_y = 0;
+        if (inp.current & J_A) {
+            uint8_t action = inp.pressed | inp.repeated;
+            uint8_t update = 0;
+
+            if (action & J_RIGHT) {
+                transparency++;
+                update = 1;
+            }
+            if (action & J_LEFT) {
+                transparency--;
+                update = 1;
+            }
+            if (action & J_UP) {
+                speed = (speed >= MAX_SPEED) ? 0 : speed + 1;
+                update = 1;
+            }
+            if (action & J_DOWN) {
+                speed = (speed == 0) ? MAX_SPEED : speed - 1;
+                update = 1;
+            }
+
+            if (update)
+                print_status();
+        } else {
+            if (inp.current & J_UP)
+                spr_y = (spr_y == 0) ? WRAP_Y - 1 : spr_y - 1;
+            if (inp.current & J_DOWN) {
+                spr_y++;
+                if (spr_y >= WRAP_Y)
+                    spr_y = 0;
+            }
+            if (inp.current & J_LEFT)
+                spr_x = (spr_x == 0) ? WRAP_X - 1 : spr_x - 1;
+            if (inp.current & J_RIGHT) {
+                spr_x++;
+                if (spr_x >= WRAP_X)
+                    spr_x = 0;
+            }
+            if (inp.current & (J_UP | J_DOWN | J_LEFT | J_RIGHT))
+                position_sprites();
         }
-        if (keys & J_LEFT)
-            spr_x = (spr_x == 0) ? WRAP_X - 1 : spr_x - 1;
-        if (keys & J_RIGHT) {
-            spr_x++;
-            if (spr_x >= WRAP_X)
-                spr_x = 0;
-        }
-        if (keys & (J_UP | J_DOWN | J_LEFT | J_RIGHT))
-            position_sprites();
     }
 }
