@@ -90,8 +90,7 @@ __at(0xC100) uint8_t _spr_buf_mem[64];
  * When transparency >= 128, swap head/tail so the same loop body handles
  * both halves. */
 static void update_sprite_buf(void) {
-    uint8_t t = transparency;
-    uint8_t do_swap = t & 0x80;
+    uint8_t do_swap = transparency & 0x80;
 
     if (do_swap) {
         if (head == tail)
@@ -109,7 +108,7 @@ static void update_sprite_buf(void) {
 
     for (uint8_t n = speed; n--;) {
         uint8_t gap = head - tail;
-        if (gap <= t) {
+        if (gap <= transparency) {
             uint8_t idx = pos_lut[head] + head_off;
             uint8_t off = (idx >> 2) & 0x3E;
             uint8_t m = ~bit_mask[idx & 7];
@@ -118,7 +117,7 @@ static void update_sprite_buf(void) {
             if (++head == 0)
                 head_off += WRAP_STEP;
         }
-        if (gap >= t) {
+        if (gap >= transparency) {
             uint8_t idx = pos_lut[tail] + tail_off;
             uint8_t off = (idx >> 2) & 0x3E;
             uint8_t m = bit_mask[idx & 7];
