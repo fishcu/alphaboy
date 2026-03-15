@@ -1,12 +1,12 @@
 """Void-and-cluster dither: Ulichney's 3-phase blue noise dither matrix."""
 """Reference: Ulichney, 'The void-and-cluster method for dither array generation' (1993)"""
 
+from pathlib import Path
+import numpy as np
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-import numpy as np
-from pathlib import Path
 
 GRID = 16
 TOTAL = GRID * GRID
@@ -14,7 +14,7 @@ SIGMA = 1.7
 
 
 # ---------------------------------------------------------------------------
-# Gaussian kernel & energy (toroidal, FFT-based)
+# Gaussian kernel (toroidal)
 # ---------------------------------------------------------------------------
 
 def gaussian_kernel(n: int, sigma: float) -> np.ndarray:
@@ -29,115 +29,117 @@ def gaussian_kernel(n: int, sigma: float) -> np.ndarray:
     return k
 
 
-def energy(pattern: np.ndarray, kern_fft: np.ndarray) -> np.ndarray:
-    """Circular convolution of binary pattern with Gaussian kernel."""
-    return np.real(np.fft.ifft2(np.fft.fft2(pattern.astype(float)) * kern_fft))
-
-
-def _pick_extremum(
-    e: np.ndarray,
-    mask: np.ndarray,
-    maximize: bool,
-    rng: np.random.Generator,
-) -> tuple[int, int, int]:
-    """Pick extremal pixel among *mask*-selected positions.
-
-    Returns (row, col, n_tied).  When n_tied > 1 the winner is chosen
-    uniformly at random among the tied candidates.
-    """
-    sentinel = -np.inf if maximize else np.inf
-    masked = np.where(mask, e, sentinel)
-    best = np.max(masked) if maximize else np.min(masked)
-    candidates = np.flatnonzero(masked == best)
-    idx = int(rng.choice(candidates)) if len(candidates) > 1 else int(candidates[0])
-    return (*divmod(idx, e.shape[1]), len(candidates))
-
-
-def find_cluster(
-    pattern: np.ndarray, kern_fft: np.ndarray, rng: np.random.Generator,
-) -> tuple[int, int, int]:
-    """1-pixel with max energy (tightest cluster).  Returns (row, col, n_tied)."""
-    return _pick_extremum(energy(pattern, kern_fft), pattern == 1, True, rng)
-
-
-def find_void(
-    pattern: np.ndarray, kern_fft: np.ndarray, rng: np.random.Generator,
-) -> tuple[int, int, int]:
-    """0-pixel with min energy (largest void).  Returns (row, col, n_tied)."""
-    return _pick_extremum(energy(pattern, kern_fft), pattern == 0, False, rng)
+def _shifted_kernels(kern: np.ndarray) -> np.ndarray:
+    """Kernel rolled to every grid position (for incremental LUT updates)."""
+    n = kern.shape[0]
+    sk = np.empty((n * n, n, n))
+    for i in range(n * n):
+        sk[i] = np.roll(np.roll(kern, i // n, axis=0), i % n, axis=1)
+    return sk
 
 
 # ---------------------------------------------------------------------------
-# Initial binary pattern
+# 3-phase dither-array construction (incremental LUT)
 # ---------------------------------------------------------------------------
 
-def initial_binary_pattern(
-    n: int, kern_fft: np.ndarray, rng: np.random.Generator,
-) -> tuple[np.ndarray, int]:
-    """Seed ~10 % ones, then swap tightest-cluster / largest-void until stable.
-
-    Returns (pattern, tie_count).
-    """
-    n_ones = max(1, n * n // 10)
-    pat = np.zeros((n, n), dtype=int)
-    for idx in rng.choice(n * n, size=n_ones, replace=False):
-        pat[idx // n, idx % n] = 1
-
-    ties = 0
-    for _ in range(TOTAL * 100):
-        cr, cc, n1 = find_cluster(pat, kern_fft, rng)
-        pat[cr, cc] = 0
-        vr, vc, n2 = find_void(pat, kern_fft, rng)
-        ties += (n1 > 1) + (n2 > 1)
-        if (cr, cc) == (vr, vc):
-            pat[cr, cc] = 1
-            break
-        pat[vr, vc] = 1
-
-    return pat, ties
-
-
-# ---------------------------------------------------------------------------
-# 3-phase dither-array construction
-# ---------------------------------------------------------------------------
-
-def build_dither_array(sigma: float = SIGMA, seed: int = 42) -> np.ndarray:
+def build_dither_array(sigma: float = SIGMA, seed: int = 184) -> np.ndarray:
     """Ulichney's 3-phase void-and-cluster dither array (ranks 0..255)."""
     rng = np.random.default_rng(seed)
-    kern = gaussian_kernel(GRID, sigma)
-    kern_fft = np.fft.fft2(kern)
+    sk = _shifted_kernels(gaussian_kernel(GRID, sigma))
 
-    ibp, ties = initial_binary_pattern(GRID, kern_fft, rng)
+    def _find(lut, pat, select_ones, maximize):
+        sentinel = -np.inf if maximize else np.inf
+        masked = np.where(pat == int(select_ones), lut, sentinel)
+        best = masked.max() if maximize else masked.min()
+        cands = np.flatnonzero(masked == best)
+        idx = int(rng.choice(cands)) if len(cands) > 1 else int(cands[0])
+        return divmod(idx, GRID)
+
+    # --- Initial binary pattern -----------------------------------------------
+    lut = np.zeros((GRID, GRID))
+    pat = np.zeros((GRID, GRID), dtype=int)
+    for idx in rng.choice(TOTAL, size=max(1, TOTAL // 10), replace=False):
+        r, c = divmod(int(idx), GRID)
+        pat[r, c] = 1
+        lut += sk[r * GRID + c]
+
+    for _ in range(TOTAL * 100):
+        cr, cc = _find(lut, pat, True, True)
+        pat[cr, cc] = 0
+        lut -= sk[cr * GRID + cc]
+        vr, vc = _find(lut, pat, False, False)
+        if (cr, cc) == (vr, vc):
+            pat[cr, cc] = 1
+            lut += sk[cr * GRID + cc]
+            break
+        pat[vr, vc] = 1
+        lut += sk[vr * GRID + vc]
+
+    ibp = pat.copy()
+    ibp_lut = lut.copy()
     n_ones = int(ibp.sum())
-
     dither = np.empty((GRID, GRID), dtype=int)
 
-    # Phase 1: remove from clusters, rank n_ones-1 .. 0
-    pat = ibp.copy()
+    # --- Phase 1: remove from clusters, rank n_ones-1 .. 0 --------------------
     for rank in range(n_ones - 1, -1, -1):
-        r, c, n = find_cluster(pat, kern_fft, rng)
-        ties += n > 1
+        r, c = _find(lut, pat, True, True)
         dither[r, c] = rank
         pat[r, c] = 0
+        lut -= sk[r * GRID + c]
 
-    # Phase 2: insert into voids, rank n_ones .. TOTAL//2 - 1
-    pat = ibp.copy()
+    # --- Phase 2: insert into voids, rank n_ones .. TOTAL//2 - 1 --------------
+    pat[:] = ibp
+    lut[:] = ibp_lut
     for rank in range(n_ones, TOTAL // 2):
-        r, c, n = find_void(pat, kern_fft, rng)
-        ties += n > 1
+        r, c = _find(lut, pat, False, False)
         dither[r, c] = rank
         pat[r, c] = 1
+        lut += sk[r * GRID + c]
 
-    # Phase 3: cluster-removal in complement, rank TOTAL//2 .. TOTAL-1
+    # --- Phase 3: cluster-removal in complement, rank TOTAL//2 .. TOTAL-1 -----
     comp = 1 - pat
+    comp_lut = sk[comp.ravel().astype(bool)].sum(axis=0)
     for rank in range(TOTAL // 2, TOTAL):
-        r, c, n = find_cluster(comp, kern_fft, rng)
-        ties += n > 1
+        r, c = _find(comp_lut, comp, True, True)
         dither[r, c] = rank
         comp[r, c] = 0
+        comp_lut -= sk[r * GRID + c]
 
-    print(f"Tie-breaks: {ties} (across ~{TOTAL * 2} extremum queries)")
     return dither
+
+
+# ---------------------------------------------------------------------------
+# Quality metrics
+# ---------------------------------------------------------------------------
+
+def radial_anisotropy(dither: np.ndarray) -> float:
+    """RMS deviation of DFT magnitude from its radial mean.  Lower = better."""
+    n = dither.shape[0]
+    mag = np.abs(np.fft.fftshift(np.fft.fft2(
+        dither.astype(float) / (n * n - 1))))
+    center = n // 2
+    mag[center, center] = 0.0
+
+    rows, cols = np.mgrid[:n, :n]
+    radii = np.sqrt((rows - center) ** 2.0 + (cols - center) ** 2.0)
+    bin_idx = np.round(radii).astype(int)
+
+    ideal = np.zeros_like(mag)
+    for b in range(1, bin_idx.max() + 1):
+        mask = bin_idx == b
+        if mask.any():
+            ideal[mask] = mag[mask].mean()
+
+    non_dc = bin_idx > 0
+    return float(np.sqrt(np.mean((mag[non_dc] - ideal[non_dc]) ** 2)))
+
+
+def directional_correlation(dither: np.ndarray) -> float:
+    """Max of horizontal/vertical lag-1 Pearson correlation.  Lower = better."""
+    vals = dither.astype(float)
+    h = float(np.corrcoef(vals.flat, np.roll(vals, -1, axis=1).flat)[0, 1])
+    v = float(np.corrcoef(vals.flat, np.roll(vals, -1, axis=0).flat)[0, 1])
+    return max(h, v)
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +184,20 @@ def render_heatmap(
     ax.set_title(title, fontsize=fontsize + 5)
 
 
+def render_dft(dither: np.ndarray, title: str, ax: plt.Axes) -> None:
+    """Show 2-D DFT magnitude (DC zeroed, log-scaled) to confirm blue-noise."""
+    vals = dither.astype(float) / (TOTAL - 1)
+    spectrum = np.abs(np.fft.fftshift(np.fft.fft2(vals)))
+    spectrum[GRID // 2, GRID // 2] = 0.0
+    ax.imshow(
+        np.log1p(spectrum), cmap="inferno",
+        interpolation="lanczos", origin="upper",
+    )
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_title(title, fontsize=10)
+
+
 def plot_dither(grid: np.ndarray) -> None:
     fig, ax = plt.subplots(figsize=(10, 10))
     render_heatmap(grid, "Void-and-Cluster Blue Noise Dither (16x16)", ax)
@@ -209,69 +225,79 @@ def plot_inverted_dither(grid: np.ndarray) -> None:
     plt.close(fig)
 
 
-def render_dft(dither: np.ndarray, title: str, ax: plt.Axes) -> None:
-    """Show 2-D DFT magnitude (DC zeroed, log-scaled) to confirm blue-noise."""
-    vals = dither.astype(float) / (TOTAL - 1)
-    spectrum = np.abs(np.fft.fftshift(np.fft.fft2(vals)))
-    spectrum[GRID // 2, GRID // 2] = 0.0
-    ax.imshow(
-        np.log1p(spectrum), cmap="inferno",
-        interpolation="lanczos", origin="upper",
+# ---------------------------------------------------------------------------
+# Seed sweep
+# ---------------------------------------------------------------------------
+
+def sweep_seeds(
+    n_seeds: int, sigma: float = SIGMA,
+) -> tuple[
+    list[tuple[int, float, np.ndarray]],
+    list[tuple[int, float, np.ndarray]],
+    list[tuple[int, float, np.ndarray]],
+]:
+    """Test seeds 0..n_seeds-1, return best-5 lists for each metric.
+
+    Returns (best_anisotropy, best_correlation, best_combined).
+    Combined score = anisotropy + dir_corr  (both lower-is-better).
+    """
+    rows: list[tuple[int, float, float, np.ndarray]] = []
+    for seed in range(n_seeds):
+        if seed % 100 == 0:
+            print(f"  sweep: {seed}/{n_seeds}")
+        d = build_dither_array(sigma, seed)
+        rows.append((seed, radial_anisotropy(
+            d), directional_correlation(d), d))
+
+    aniso_vals = np.array([t[1] for t in rows])
+    corr_vals = np.array([t[2] for t in rows])
+    a_mean, a_std = aniso_vals.mean(), aniso_vals.std()
+    c_mean, c_std = corr_vals.mean(), corr_vals.std()
+
+    by_aniso = sorted(rows, key=lambda t: t[1])[:5]
+    by_corr = sorted(rows, key=lambda t: t[2])[:5]
+    by_comb = sorted(
+        rows, key=lambda t: (t[1] - a_mean) / a_std + (t[2] - c_mean) / c_std,
+    )[:5]
+
+    print(f"  anisotropy  mean={a_mean:.4f}  std={a_std:.4f}")
+    print(f"  dir_corr    mean={c_mean:.4f}  std={c_std:.4f}")
+
+    return (
+        [(s, a, d) for s, a, _, d in by_aniso],
+        [(s, c, d) for s, _, c, d in by_corr],
+        [
+            (s, (a - a_mean) / a_std + (c - c_mean) / c_std, d)
+            for s, a, c, d in by_comb
+        ],
     )
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_title(title, fontsize=10)
 
 
-SIGMAS = [1.50, 1.60, 1.70, 1.80, 1.90]
-SEEDS = [7, 13, 99, 137, 200]
-
-
-def plot_sigma_comparison(sigmas: list[float]) -> None:
-    n = len(sigmas)
+def plot_best_seeds(
+    results: list[tuple[int, float, np.ndarray]],
+    metric_name: str,
+    filename: str,
+    n_tested: int = 0,
+) -> None:
+    n = len(results)
     fig, axes = plt.subplots(3, n, figsize=(8 * n, 24))
 
-    for col, sigma in enumerate(sigmas):
-        print(f"  sigma={sigma} ...")
-        dither = build_dither_array(sigma)
+    for col, (seed, score, dither) in enumerate(results):
         inverted = invert_dither_array(dither)
-
-        render_heatmap(dither, f"Dither  σ={sigma}", axes[0, col], fontsize=5)
-        render_heatmap(inverted, f"Inverted  σ={sigma}", axes[1, col], fontsize=5)
-        render_dft(dither, f"DFT magnitude  σ={sigma}", axes[2, col])
-
-    fig.suptitle(
-        "Void-and-Cluster: sigma comparison (16×16)",
-        fontsize=18, y=0.995,
-    )
-    plt.tight_layout(rect=[0, 0, 1, 0.99])
-
-    out = Path(__file__).parent / "void_cluster_sigma_comparison.png"
-    fig.savefig(out, dpi=150)
-    print(f"Saved {out}")
-    plt.close(fig)
-
-
-def plot_seed_comparison(seeds: list[int], sigma: float = SIGMA) -> None:
-    n = len(seeds)
-    fig, axes = plt.subplots(3, n, figsize=(8 * n, 24))
-
-    for col, seed in enumerate(seeds):
-        print(f"  seed={seed} ...")
-        dither = build_dither_array(sigma, seed)
-        inverted = invert_dither_array(dither)
-
-        render_heatmap(dither, f"seed={seed}", axes[0, col], fontsize=5)
+        render_heatmap(
+            dither, f"seed={seed}\n{metric_name}={score:.4f}",
+            axes[0, col], fontsize=5,
+        )
         render_heatmap(inverted, f"inv  seed={seed}", axes[1, col], fontsize=5)
         render_dft(dither, f"DFT  seed={seed}", axes[2, col])
 
     fig.suptitle(
-        f"Void-and-Cluster: seed comparison (σ={sigma}, 16×16)",
+        f"Best 5 by {metric_name} (σ={SIGMA}, 16×16, {n_tested} seeds)",
         fontsize=18, y=0.995,
     )
     plt.tight_layout(rect=[0, 0, 1, 0.99])
 
-    out = Path(__file__).parent / "void_cluster_seed_comparison.png"
+    out = Path(__file__).parent / filename
     fig.savefig(out, dpi=150)
     print(f"Saved {out}")
     plt.close(fig)
@@ -289,8 +315,23 @@ if __name__ == "__main__":
     plot_dither(dither)
     plot_inverted_dither(dither)
 
-    print("Generating sigma comparison …")
-    plot_sigma_comparison(SIGMAS)
+    n_seeds = 1000
+    print(f"Sweeping {n_seeds} seeds …")
+    best_aniso, best_corr, best_comb = sweep_seeds(n_seeds)
 
-    print("Generating seed comparison …")
-    plot_seed_comparison(SEEDS)
+    print(f"\nBest 5 by radial anisotropy:")
+    for seed, score, _ in best_aniso:
+        print(f"  seed={seed:4d}  anisotropy={score:.4f}")
+    print(f"Best 5 by directional correlation:")
+    for seed, score, _ in best_corr:
+        print(f"  seed={seed:4d}  dir_corr={score:.4f}")
+    print(f"Best 5 by combined (aniso + dir_corr):")
+    for seed, score, _ in best_comb:
+        print(f"  seed={seed:4d}  combined={score:.4f}")
+
+    plot_best_seeds(best_aniso, "anisotropy",
+                    "void_cluster_best_anisotropy.png", n_seeds)
+    plot_best_seeds(best_corr, "dir_corr",
+                    "void_cluster_best_correlation.png", n_seeds)
+    plot_best_seeds(best_comb, "combined",
+                    "void_cluster_best_combined.png", n_seeds)
