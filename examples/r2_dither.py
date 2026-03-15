@@ -129,10 +129,22 @@ def render_heatmap(grid: np.ndarray, title: str, ax: plt.Axes) -> None:
 
 def plot_dither(grid: np.ndarray) -> None:
     fig, ax = plt.subplots(figsize=(10, 10))
-    render_heatmap(grid, "R2 Quasirandom Dither Pattern (16\u00d716)", ax)
+    render_heatmap(grid, "R2 Quasirandom Dither Pattern (16x16)", ax)
     plt.tight_layout()
 
     out = Path(__file__).parent / "r2_dither.png"
+    fig.savefig(out, dpi=150)
+    print(f"Saved {out}")
+    plt.close(fig)
+
+
+def plot_inverted_dither(grid: np.ndarray) -> None:
+    inverted = invert_dither_array(grid)
+    fig, ax = plt.subplots(figsize=(10, 10))
+    render_heatmap(inverted, "Inverted R2 Dither (fill order -> position index)", ax)
+    plt.tight_layout()
+
+    out = Path(__file__).parent / "r2_dither_inverted.png"
     fig.savefig(out, dpi=150)
     print(f"Saved {out}")
     plt.close(fig)
@@ -149,8 +161,8 @@ def show_dither_debug(dither: np.ndarray) -> None:
     inverted = invert_dither_array(dither)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
-    render_heatmap(dither, "R2 Dither (position \u2192 fill order)", ax1)
-    render_heatmap(inverted, "Inverted R2 (fill order \u2192 position index)", ax2)
+    render_heatmap(dither, "R2 Dither (position -> fill order)", ax1)
+    render_heatmap(inverted, "Inverted R2 (fill order -> position index)", ax2)
     plt.tight_layout()
 
     surf = fig_to_pygame_surface(fig)
@@ -339,7 +351,8 @@ def animate(
 
 if __name__ == "__main__":
     dither = build_dither_array()
-    # plot_dither(dither)
+    plot_dither(dither)
+    plot_inverted_dither(dither)
 
     sprite = build_sprite()
 
