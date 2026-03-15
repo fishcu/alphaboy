@@ -80,7 +80,7 @@ void vram_set_tile(uint16_t pc, uint8_t tile) {
     *addr = tile;
 }
 
-/* Full board redraw — used only at init (display off, fast).
+/* Full board redraw  --  used only at init (display off, fast).
  * Draws the decorative frame and all intersections.
  * During gameplay, game_play_move updates tiles incrementally. */
 static void board_redraw(const game_t *g) {
@@ -222,7 +222,7 @@ static void vbl_isr(void) NONBANKED {
     DIV_REG = 0;
     IF_REG &= ~TIM_IFLAG;
 
-    /* Drain tile queue — VRAM is freely accessible during VBlank.
+    /* Drain tile queue  --  VRAM is freely accessible during VBlank.
      * Only committed entries are visible; speculative (uncommitted)
      * pushes from an in-progress move are not touched. */
     uint8_t h = tile_queue_head;
@@ -244,7 +244,7 @@ void main(void) {
     /*
      * Set LCDC bit 4: BG + Window read tile data from 0x8000 (unsigned),
      * sharing the same region as sprites.  All other LCDC bits start clear
-     * (display off, layers off) — we turn them on at the end.
+     * (display off, layers off)  --  we turn them on at the end.
      */
     LCDC_REG = LCDCF_BG8000;
 
@@ -357,7 +357,7 @@ void main(void) {
         if (game_input->pressed & J_B) {
             if (game_undo(g) == UNDO_OK) {
 #ifndef NDEBUG
-                EMU_printf("Undo → move_count=%u\n", (unsigned)g->move_count);
+                EMU_printf("Undo -> move_count=%u\n", (unsigned)g->move_count);
                 game_debug_print(g);
 #endif
             }

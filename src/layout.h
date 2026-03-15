@@ -100,7 +100,7 @@ _Static_assert(sizeof(sram_layout_t) <= 0x2000u, "SRAM overflow");
 /* Base address value for set_tile_data() to target 0x8000. */
 #define TILE_DATA_BASE 0x80
 
-/* Tile indices — sequential order matches png2asset output.
+/* Tile indices  --  sequential order matches png2asset output.
  * The PNG is scanned left-to-right, top-to-bottom; duplicate (empty)
  * tiles are deduplicated so only TILE_EMPTY occupies index 0. */
 enum {
@@ -232,7 +232,7 @@ void vram_set_tile(uint16_t pc, uint8_t tile);
 /* Push a tile update onto the deferred queue.  The VBlank ISR drains
  * committed entries to VRAM each frame.  Busy-waits if the queue is full.
  * No critical section needed: single-producer single-consumer ring
- * buffer — the ISR only touches head, the producer only touches tail. */
+ * buffer  --  the ISR only touches head, the producer only touches tail. */
 static inline void tile_push(uint16_t pc, uint8_t tile) {
     const uint8_t t = tile_queue_tail;
     const uint8_t next = (t + 1) % TILE_QUEUE_MAX;

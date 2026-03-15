@@ -62,7 +62,7 @@ typedef uint8_t undo_result_t;
 /* --- Coordinates and moves --- */
 
 /* COORD_PASS is a sentinel that can never be a valid packed coordinate.
- * Decodes to padded row=31, col=31 — well outside the valid range.
+ * Decodes to padded row=31, col=31  --  well outside the valid range.
  * The 10-bit move coordinate field supports boards up to 30x30. */
 #define COORD_PASS 0x03FFu
 
@@ -80,7 +80,7 @@ typedef uint16_t move_t;
 
 #define MOVE_MAKE(coord, color)                                                \
     ((move_t)((coord) | ((move_t)(color) << MOVE_COLOR_BIT)))
-#define MOVE_COORD(m) ((m) & MOVE_COORD_MASK)
+#define MOVE_COORD(m) ((m)&MOVE_COORD_MASK)
 #define MOVE_COLOR(m) ((m) >> MOVE_COLOR_BIT)
 
 /* Maximum number of moves stored in history. */
@@ -91,7 +91,7 @@ typedef uint16_t move_t;
 /* Extract board-relative row / column (0-based, no margin) from a
  * packed coordinate.  Used in cold paths for surface tile lookups. */
 #define BOARD_ROW(pc) ((uint8_t)((pc) >> COORD_SHIFT) - BOARD_MARGIN)
-#define BOARD_COL(pc) ((uint8_t)((pc) & COORD_COL_MASK) - BOARD_MARGIN)
+#define BOARD_COL(pc) ((uint8_t)((pc)&COORD_COL_MASK) - BOARD_MARGIN)
 
 /* --- Coordinate helpers --- */
 
@@ -146,7 +146,7 @@ undo_result_t game_undo(game_t *g);
 color_t game_color_to_play(const game_t *g);
 
 /* Cheap legality approximation: 1 if (col, row) is empty and not ko.
- * Does not check suicide — intended for ghost stone display gating. */
+ * Does not check suicide  --  intended for ghost stone display gating. */
 uint8_t game_can_play_approx(const game_t *g, uint8_t col, uint8_t row);
 
 #ifndef NDEBUG

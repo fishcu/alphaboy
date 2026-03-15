@@ -12,7 +12,7 @@
 static uint8_t flood_generation = 0;
 
 /* Unrolled four-neighbor iteration.  Each direction offset and bit
- * mask is a compile-time immediate — no loop counter, no table lookup.
+ * mask is a compile-time immediate  --  no loop counter, no table lookup.
  * Bodies must not use break/continue (restructure to if/else). */
 #define FOR_EACH_NEIGHBOR(center, nb, body)                                    \
     do {                                                                       \
