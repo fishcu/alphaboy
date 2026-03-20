@@ -2,7 +2,7 @@
 #include <gb/hardware.h>
 
 #include "cursor.h"
-#include "layout.h"
+#include "display.h"
 
 /* Compute target OAM X as fixed-point 8.8.
  * Board is drawn at BG tile (0,0) and centered via scroll registers.
@@ -93,7 +93,7 @@ void cursor_update(cursor_t *c, const input_t *inp, const game_t *g) {
      * register to match the stone color since only one plays at a time. */
     if (game_can_play_approx(g, c->col, c->row)) {
         const uint8_t black = (game_color_to_play(g) == COLOR_BLACK);
-        OBP1_REG = black ? DMG_PAL(0, 1, 2, 3) : DMG_PAL(0, 0, 1, 2);
+        OBP1_REG = black ? DMG_PALETTE(0, 1, 2, 3) : DMG_PALETTE(0, 0, 1, 2);
         set_sprite_tile(GHOST_SPR, black ? TILE_SPR_STONE_B : TILE_SPR_STONE_W);
         set_sprite_prop(GHOST_SPR, S_PALETTE);
         move_sprite(GHOST_SPR, (tx + 128) >> 8, ((ty + 128) >> 8) + 1);

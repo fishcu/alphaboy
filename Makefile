@@ -18,14 +18,16 @@ PNG2ASSET  = $(GBDK_HOME)bin/png2asset
 # ---- Project ----
 PROJECTNAME = alphaboy
 
-SRCDIR   = src
-RESDIR   = res
+SRCDIR     = src
+INCDIR     = include
+RESDIR     = res
+PROFILEDIR = examples/profile
 
 # ---- Build configuration ----
 # BUILD = debug          (default) debug symbols, verbose, no optimisation
 # BUILD = release        optimised, no debug symbols
 # BUILD = relwithdebinfo optimised + debug symbols (best for profiling)
-# BUILD = profile        relwithdebinfo + demo mode (used by `make flamegraph`)
+# BUILD = profile        relwithdebinfo + demo replay (used by `make flamegraph`)
 BUILD ?= debug
 
 OBJDIR   = obj/$(BUILD)
@@ -37,15 +39,23 @@ CSOURCES   = $(foreach dir,$(SRCDIR),$(notdir $(wildcard $(dir)/*.c)))
 RESSOURCES = $(foreach dir,$(RESDIR),$(notdir $(wildcard $(dir)/*.c)))
 ASMSOURCES = $(foreach dir,$(SRCDIR),$(notdir $(wildcard $(dir)/*.s)))
 
+ifeq ($(BUILD),profile)
+    PROFILESOURCES = $(notdir $(wildcard $(PROFILEDIR)/*.c))
+    CSOURCES := $(filter-out main.c,$(CSOURCES))
+endif
+
 OBJS  = $(CSOURCES:%.c=$(OBJDIR)/%.o)
 OBJS += $(RESSOURCES:%.c=$(OBJDIR)/%.o)
 OBJS += $(ASMSOURCES:%.s=$(OBJDIR)/%.o)
+ifeq ($(BUILD),profile)
+    OBJS += $(PROFILESOURCES:%.c=$(OBJDIR)/%.o)
+endif
 
 # ---- Flags ----
 # MBC5 + RAM + Battery (cart type 0x1B), 1 RAM bank (8 KB)
-LCCFLAGS = -Wm-yt0x1B -Wm-ya1
+LCCFLAGS = -Wm-yt0x1B -Wm-ya1 -I$(INCDIR) -I$(RESDIR)
 
-FLAME_FPM ?= 5
+PROFILE_FPM ?= 5
 
 ifeq ($(BUILD),release)
 	LCCFLAGS += -DNDEBUG -Wf--opt-code-speed -Wf--max-allocs-per-node50000
@@ -53,7 +63,7 @@ else ifeq ($(BUILD),relwithdebinfo)
 	LCCFLAGS += -debug -DNDEBUG -Wf--opt-code-speed -Wf--max-allocs-per-node50000
 else ifeq ($(BUILD),profile)
 	LCCFLAGS += -debug -DNDEBUG -Wf--opt-code-speed -Wf--max-allocs-per-node50000 \
-	            -DDEMO_MODE -DDEMO_FRAME_INTERVAL=$(FLAME_FPM)
+	            -DREPLAY_FRAME_INTERVAL=$(PROFILE_FPM)
 else
 	LCCFLAGS += -debug -v
 endif
@@ -76,6 +86,10 @@ $(OBJDIR)/%.o: $(RESDIR)/%.c
 
 # Compile src/*.s
 $(OBJDIR)/%.o: $(SRCDIR)/%.s
+	$(LCC) $(LCCFLAGS) -c -o $@ $<
+
+# Compile examples/profile/*.c (profile build only)
+$(OBJDIR)/%.o: $(PROFILEDIR)/%.c
 	$(LCC) $(LCCFLAGS) -c -o $@ $<
 
 # ---- Asset conversion ----
@@ -129,8 +143,8 @@ else
 endif
 
 # ---- Flamegraph profiling ----
-# Builds with demo mode, runs gb-flamegraph, outputs to build/flamegraph/.
-# FLAME_FPM   = frames per demo move (default 5)
+# Builds the profile ROM, runs gb-flamegraph, outputs to build/flamegraph/.
+# PROFILE_FPM = frames per replay move (default 5)
 # FLAME_FRAMES = total frames to simulate (default: 180 moves * FPM + 10 init)
 
 GB_FLAMEGRAPH  = npx --yes https://github.com/chrismaltby/gb-flamegraph.git
@@ -148,7 +162,7 @@ flamegraph:
 # ---- Formatting ----
 
 format:
-	clang-format -i $(wildcard $(SRCDIR)/*.c $(SRCDIR)/*.h $(RESDIR)/*.c $(RESDIR)/*.h)
+	clang-format -i $(wildcard $(SRCDIR)/*.c $(INCDIR)/*.h $(RESDIR)/*.c $(RESDIR)/*.h examples/*/*.c examples/*/*.h)
 
 clean:
 	-$(RMDIR) obj

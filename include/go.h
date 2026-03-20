@@ -33,7 +33,6 @@
 /* --- Cell state (one uint8_t per board position) ---
  * COLOR_BLACK and COLOR_WHITE double as both color constants and cell values.
  */
-
 typedef enum {
     COLOR_BLACK = 0,
     COLOR_WHITE = 1,
@@ -132,12 +131,12 @@ void game_play_pass(game_t *g, color_t color);
 
 /* Play a stone at the packed coordinate `coord` for `color`.  Updates the
  * board state and writes changed tiles to VRAM incrementally.
- * Uses flood_deque / flood_visited from layout.h as scratch buffers.
+ * Uses flood_deque / flood_visited from memory.h as scratch buffers.
  * Returns a move_legality_t indicating whether the move was played. */
 move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color);
 
 /* Undo the last move, restoring captured stones and ko state.
- * Uses flood_deque from layout.h as a scratch buffer.
+ * Uses flood_deque from memory.h as a scratch buffer.
  * Returns UNDO_OK on success, UNDO_NO_HISTORY if nothing to undo. */
 undo_result_t game_undo(game_t *g);
 
@@ -148,12 +147,5 @@ color_t game_color_to_play(const game_t *g);
 /* Cheap legality approximation: 1 if (col, row) is empty and not ko.
  * Does not check suicide  --  intended for ghost stone display gating. */
 uint8_t game_can_play_approx(const game_t *g, uint8_t col, uint8_t row);
-
-#ifndef NDEBUG
-/* Print the board state to the emulator debug message window.
- * Output resembles GnuGo's ASCII board: X=black, O=white, .=empty.
- * Compiles away in release builds (NDEBUG defined). */
-void game_debug_print(const game_t *g);
-#endif
 
 #endif /* GO_H */

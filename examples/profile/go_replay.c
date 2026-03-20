@@ -1,12 +1,8 @@
-#include "demo.h"
-
-#ifdef DEMO_MODE
-
-#include "layout.h"
+#include "go_replay.h"
 
 /* AlphaGo vs Lee Sedol, Game 4 (2016-03-13), W+R.
  * 180 moves stored as (col, row) pairs, parsed from SGF. */
-static const uint8_t demo_moves[] = {
+static const uint8_t replay_moves[] = {
     15, 3,  3,  15, 2,  3,  16, 15, /* pd dp cd qp */
     14, 15, 14, 16, 13, 16, 15, 16, /* op oq nq pq */
     2,  13, 5,  16, 12, 15, 15, 14, /* cn fq mp po */
@@ -54,26 +50,24 @@ static const uint8_t demo_moves[] = {
     13, 8,  13, 9,  14, 14, 9,  15, /* ni nj oo jp */
 };
 
-#define DEMO_MOVE_COUNT (sizeof(demo_moves) / 2)
+#define REPLAY_MOVE_COUNT (sizeof(replay_moves) / 2)
 
-static uint16_t demo_index;
-static uint8_t demo_timer;
+static uint16_t replay_index;
+static uint8_t replay_timer;
 
-uint8_t demo_step(game_t *g) {
-    if (demo_index >= DEMO_MOVE_COUNT)
+uint8_t go_replay_step(game_t *g) {
+    if (replay_index >= REPLAY_MOVE_COUNT)
         return 0;
 
-    if (++demo_timer < DEMO_FRAME_INTERVAL)
+    if (++replay_timer < REPLAY_FRAME_INTERVAL)
         return 0;
-    demo_timer = 0;
+    replay_timer = 0;
 
-    const uint8_t col = demo_moves[demo_index * 2];
-    const uint8_t row = demo_moves[demo_index * 2 + 1];
+    const uint8_t col = replay_moves[replay_index * 2];
+    const uint8_t row = replay_moves[replay_index * 2 + 1];
     const uint8_t color = game_color_to_play(g);
 
     game_play_move(g, BOARD_COORD(col, row), color);
-    demo_index++;
+    replay_index++;
     return 1;
 }
-
-#endif /* DEMO_MODE */

@@ -1,12 +1,12 @@
 #include "go.h"
-#include "layout.h"
 
 #include <assert.h>
 #include <string.h>
 
-#ifndef NDEBUG
-#include <gbdk/emu_debug.h>
-#endif
+#include "display.h"
+#include "go_draw.h"
+#include "memory.h"
+#include "tile_queue.h"
 
 /* Last used flood-visited generation; 0 is reserved for "clear". */
 static uint8_t flood_generation = 0;
@@ -413,39 +413,3 @@ uint8_t game_can_play_approx(const game_t *g, uint8_t col, uint8_t row) {
         return 0;
     return 1;
 }
-
-#ifndef NDEBUG
-void game_debug_print(const game_t *g) {
-    const uint8_t w = g->width;
-    const uint8_t h = g->height;
-    uint16_t pos = BOARD_COORD(0, 0);
-    /* Worst case: 19 chars + 18 spaces + null = 38 bytes. */
-    char row_str[BOARD_MAX_SIZE * 2];
-
-    EMU_printf("Board %hux%hu\n", (uint8_t)w, (uint8_t)h);
-
-    for (uint8_t row = 0; row < h; row++) {
-        uint16_t p = pos;
-        uint8_t idx = 0;
-        for (uint8_t col = 0; col < w; col++) {
-            if (col > 0)
-                row_str[idx++] = ' ';
-            switch (g->board[p]) {
-            case COLOR_BLACK:
-                row_str[idx++] = 'X';
-                break;
-            case COLOR_WHITE:
-                row_str[idx++] = 'O';
-                break;
-            default:
-                row_str[idx++] = '.';
-                break;
-            }
-            p++;
-        }
-        row_str[idx] = '\0';
-        EMU_printf("%s\n", row_str);
-        pos += DIR_DOWN;
-    }
-}
-#endif
