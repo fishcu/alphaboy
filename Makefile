@@ -3,8 +3,8 @@
 
 # ---- Platform detection ----
 ifeq ($(OS),Windows_NT)
-    MKDIR  = cmd /c mkdir
-    RMDIR  = cmd /c rmdir /S /Q
+    MKDIR  = cmd /c if not exist
+    RMDIR  = cmd /c if exist
 else
     MKDIR  = mkdir -p
     RMDIR  = rm -rf
@@ -103,8 +103,8 @@ $(RESDIR)/tiles.c: assets/tiles.png
 
 dirs:
 ifeq ($(OS),Windows_NT)
-	-$(MKDIR) $(subst /,\,$(OBJDIR))
-	-$(MKDIR) $(subst /,\,$(BUILDDIR))
+	@$(MKDIR) "$(subst /,\,$(OBJDIR))" mkdir "$(subst /,\,$(OBJDIR))"
+	@$(MKDIR) "$(subst /,\,$(BUILDDIR))" mkdir "$(subst /,\,$(BUILDDIR))"
 else
 	-$(MKDIR) $(OBJDIR)
 	-$(MKDIR) $(BUILDDIR)
@@ -165,7 +165,12 @@ format:
 	clang-format -i $(wildcard $(SRCDIR)/*.c $(INCDIR)/*.h $(RESDIR)/*.c $(RESDIR)/*.h examples/*/*.c examples/*/*.h)
 
 clean:
+ifeq ($(OS),Windows_NT)
+	@$(RMDIR) "obj" rmdir /S /Q "obj"
+	@$(RMDIR) "build" rmdir /S /Q "build"
+else
 	-$(RMDIR) obj
 	-$(RMDIR) build
+endif
 
 .PHONY: all dirs assets run format flamegraph clean
