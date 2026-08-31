@@ -68,6 +68,13 @@ else
 	LCCFLAGS += -debug -v
 endif
 
+# VBlank must meet a hardware deadline in every configuration.  Keep its
+# implementation and direct helpers optimized even in the debug build.
+ifeq ($(BUILD),debug)
+    REALTIME_OBJS = $(OBJDIR)/cursor.o $(OBJDIR)/input.o $(OBJDIR)/interrupts.o
+    $(REALTIME_OBJS): LCCFLAGS += -Wf--opt-code-speed -Wf--max-allocs-per-node50000
+endif
+
 # ---- Targets ----
 
 all: dirs $(BINS)

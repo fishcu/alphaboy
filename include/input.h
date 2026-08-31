@@ -16,7 +16,7 @@ typedef struct input {
 } input_t;
 
 /* Sample the joypad and update all derived fields.
- * Call exactly once per frame, before any consumers read the state. */
+ * Called exactly once per frame by the gameplay VBlank ISR. */
 void input_poll(input_t *inp);
 
 #endif /* INPUT_H */

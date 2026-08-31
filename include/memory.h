@@ -38,30 +38,32 @@
 
 #define SRAM_BASE 0xA000u
 
-/* ---- Tile update queue ----
- * Game logic and cursor restoration push tile changes here instead of
- * writing VRAM directly.  The VBlank ISR drains up to TILE_DRAIN_LIMIT
- * committed entries per frame (FIFO), keeping all BG-map writes inside
- * the VBlank window.  Uncommitted entries are invisible to the ISR;
- * tile_commit() makes them drainable, tile_rewind() discards them.
+/* ---- Board animation queue ----
+ * Game logic appends ordered BG-map changes here.  The VBlank ISR applies
+ * commands until an animation-step boundary is reached, keeping all VRAM
+ * writes inside VBlank.  The committed frontier hides speculative move
+ * prefixes until legality is known.
  *
- * See tile_queue.h for the producer-side inline helpers. */
-#define TILE_QUEUE_MAX 32u /* must be power of 2 */
-#define TILE_DRAIN_LIMIT 1
+ * See board_animation.h for the producer-side inline helpers. */
+#define BOARD_ANIMATION_QUEUE_MAX 32u /* must be power of 2 */
+#define BOARD_ANIMATION_MAX_WRITES_PER_FRAME 4u
 
-typedef struct tile_entry {
+typedef struct board_animation_entry {
     uint16_t pc;
     uint8_t tile;
-} tile_entry_t;
+} board_animation_entry_t;
 
 typedef struct sram_layout {
     game_t game;
     input_t input;
     cursor_t cursor;
-    uint8_t tile_queue_head;
-    uint8_t tile_queue_tail;
-    uint8_t tile_queue_committed;
-    tile_entry_t tile_queue[TILE_QUEUE_MAX];
+    uint8_t game_action_pending;
+    uint8_t game_action_busy;
+    uint16_t game_action_coord;
+    uint8_t board_animation_head;
+    uint8_t board_animation_tail;
+    uint8_t board_animation_committed;
+    board_animation_entry_t board_animation_queue[BOARD_ANIMATION_QUEUE_MAX];
     uint16_t flood_deque[BOARD_POSITIONS];
     uint8_t flood_visited[BOARD_CELLS];
 } sram_layout_t;
@@ -71,15 +73,27 @@ _Static_assert(sizeof(sram_layout_t) <= 0x2000u, "SRAM overflow");
 #define game_state ((game_t *)(SRAM_BASE + offsetof(sram_layout_t, game)))
 #define game_input ((input_t *)(SRAM_BASE + offsetof(sram_layout_t, input)))
 #define game_cursor ((cursor_t *)(SRAM_BASE + offsetof(sram_layout_t, cursor)))
-#define tile_queue_head                                                        \
+#define game_action_pending                                                    \
     (*(volatile uint8_t *)(SRAM_BASE +                                         \
-                           offsetof(sram_layout_t, tile_queue_head)))
-#define tile_queue_tail                                                        \
-    (*(uint8_t *)(SRAM_BASE + offsetof(sram_layout_t, tile_queue_tail)))
-#define tile_queue_committed                                                   \
-    (*(uint8_t *)(SRAM_BASE + offsetof(sram_layout_t, tile_queue_committed)))
-#define tile_queue                                                             \
-    ((tile_entry_t *)(SRAM_BASE + offsetof(sram_layout_t, tile_queue)))
+                           offsetof(sram_layout_t, game_action_pending)))
+#define game_action_busy                                                       \
+    (*(volatile uint8_t *)(SRAM_BASE +                                         \
+                           offsetof(sram_layout_t, game_action_busy)))
+#define game_action_coord                                                      \
+    (*(volatile uint16_t *)(SRAM_BASE +                                        \
+                            offsetof(sram_layout_t, game_action_coord)))
+#define board_animation_head                                                   \
+    (*(volatile uint8_t *)(SRAM_BASE +                                         \
+                           offsetof(sram_layout_t, board_animation_head)))
+#define board_animation_tail                                                   \
+    (*(uint8_t *)(SRAM_BASE + offsetof(sram_layout_t, board_animation_tail)))
+#define board_animation_committed                                              \
+    (*(volatile uint8_t *)(SRAM_BASE + offsetof(sram_layout_t,                 \
+                                                board_animation_committed)))
+#define board_animation_queue                                                  \
+    ((volatile board_animation_entry_t *)(SRAM_BASE +                          \
+                                          offsetof(sram_layout_t,              \
+                                                   board_animation_queue)))
 #define flood_deque                                                            \
     ((uint16_t *)(SRAM_BASE + offsetof(sram_layout_t, flood_deque)))
 #define flood_visited                                                          \

@@ -3,10 +3,10 @@
 #include <assert.h>
 #include <string.h>
 
+#include "board_animation.h"
 #include "display.h"
 #include "go_draw.h"
 #include "memory.h"
-#include "tile_queue.h"
 
 /* Last used flood-visited generation; 0 is reserved for "clear". */
 static uint8_t flood_generation = 0;
@@ -180,11 +180,35 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
 /* ---- Play a move ---- */
 
 void game_play_pass(game_t *g, color_t color) {
-    if (g->ko != COORD_PASS) {
-        tile_push(g->ko, surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
-                                      g->width, g->height));
+    uint8_t animation_start;
+
+    board_animation_wait_for(2);
+    assert(board_animation_tail == board_animation_committed &&
+           "previous board animation was not fully published");
+    animation_start = board_animation_tail;
+
+    if (g->move_count > g->history_base) {
+        const move_t prev = g->history[(g->move_count - 1) % HISTORY_MAX];
+        const uint16_t pc = MOVE_COORD(prev);
+        if (pc != COORD_PASS) {
+            const uint8_t prev_color = g->board[pc];
+            if (prev_color == COLOR_BLACK)
+                board_animation_push(pc, TILE_STONE_B);
+            else if (prev_color == COLOR_WHITE)
+                board_animation_push(pc, TILE_STONE_W);
+        }
     }
-    tile_commit();
+
+    if (g->ko != COORD_PASS) {
+        board_animation_push(g->ko,
+                             surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
+                                          g->width, g->height));
+    }
+    if (board_animation_tail != animation_start) {
+        board_animation_end_frame();
+        board_animation_commit();
+    }
+
     g->ko = COORD_PASS;
     if (g->move_count >= g->history_base + HISTORY_MAX)
         g->history_base++;
@@ -199,14 +223,25 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
     if (g->board[coord] != COLOR_EMPTY)
         return MOVE_NON_EMPTY;
 
+    /*
+     * The speculative visual prefix is bounded: previous last marker,
+     * previous ko marker, new stone, and a possible new ko marker.
+     */
+    board_animation_wait_for(4);
+    assert(board_animation_tail == board_animation_committed &&
+           "previous board animation was not fully published");
+
     const color_t own_color = color;
     const color_t opp_color = COLOR_OPPOSITE(color);
     g->board[coord] = own_color;
 
     uint8_t move_hi = (uint8_t)((coord >> 8) | (color << (MOVE_COLOR_BIT - 8)));
     uint8_t captured_total = 0;
+    uint8_t stream_pending = 0;
+    uint8_t prefix_committed = 0;
+    uint16_t pending_single_capture = COORD_PASS;
 
-    /* ---- Speculative tile pushes (uncommitted) ----
+    /* ---- Speculative animation prefix (uncommitted) ----
      * Pushed before captures so the FIFO drain shows cosmetic updates
      * first.  On suicide the queue is rewound and none reach VRAM. */
 
@@ -217,20 +252,22 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
         if (pc != COORD_PASS) {
             const uint8_t prev_color = g->board[pc];
             if (prev_color == COLOR_BLACK)
-                tile_push(pc, TILE_STONE_B);
+                board_animation_push(pc, TILE_STONE_B);
             else if (prev_color == COLOR_WHITE)
-                tile_push(pc, TILE_STONE_W);
+                board_animation_push(pc, TILE_STONE_W);
         }
     }
 
     /* Clear previous ko marker tile. */
     if (g->ko != COORD_PASS) {
-        tile_push(g->ko, surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
-                                      g->width, g->height));
+        board_animation_push(g->ko,
+                             surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
+                                          g->width, g->height));
     }
 
     /* Mark new last-played stone. */
-    tile_push(coord, (color == COLOR_BLACK) ? TILE_LAST_B : TILE_LAST_W);
+    board_animation_push(coord,
+                         (color == COLOR_BLACK) ? TILE_LAST_B : TILE_LAST_W);
 
     /* ---- Capture loop ---- */
 
@@ -245,18 +282,45 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
                 g->board[nb + DIR_RIGHT] != COLOR_EMPTY) {
                 uint16_t group_size;
                 if (!group_has_liberty_capture(g, nb, opp_color, &group_size)) {
-                    for (uint16_t i = 0; i < group_size; i++) {
-                        const uint16_t cap = flood_deque[i];
-                        g->board[cap] = COLOR_EMPTY;
-                        tile_push(cap,
-                                  surface_tile(BOARD_COL(cap), BOARD_ROW(cap),
-                                               g->width, g->height));
-                    }
                     move_hi |= dir_bit << (MOVE_CAP_SHIFT - 8);
-                    if (captured_total == 0 && group_size == 1)
+
+                    /*
+                     * Hold a lone first capture locally until ko detection.
+                     * A ko tile belongs in the immediate prefix and replaces
+                     * that capture's normal removal command.
+                     */
+                    if (captured_total == 0 && group_size == 1) {
+                        pending_single_capture = flood_deque[0];
+                        g->board[pending_single_capture] = COLOR_EMPTY;
                         captured_total = 1;
-                    else
+                    } else {
+                        if (!prefix_committed) {
+                            board_animation_end_frame();
+                            board_animation_commit();
+                            prefix_committed = 1;
+                        }
+
+                        if (captured_total == 1) {
+                            board_animation_stream_push(
+                                pending_single_capture,
+                                surface_tile(BOARD_COL(pending_single_capture),
+                                             BOARD_ROW(pending_single_capture),
+                                             g->width, g->height),
+                                &stream_pending);
+                            pending_single_capture = COORD_PASS;
+                        }
+
                         captured_total = 2;
+                        for (uint16_t i = 0; i < group_size; i++) {
+                            const uint16_t cap = flood_deque[i];
+                            g->board[cap] = COLOR_EMPTY;
+                            board_animation_stream_push(
+                                cap,
+                                surface_tile(BOARD_COL(cap), BOARD_ROW(cap),
+                                             g->width, g->height),
+                                &stream_pending);
+                        }
+                    }
                 }
             }
         }
@@ -269,7 +333,7 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
         g->board[coord + DIR_LEFT] != COLOR_EMPTY &&
         g->board[coord + DIR_RIGHT] != COLOR_EMPTY) {
         if (!group_has_liberty(g, coord, own_color)) {
-            tile_rewind();
+            board_animation_rewind();
             g->board[coord] = COLOR_EMPTY;
             return MOVE_SUICIDAL;
         }
@@ -294,12 +358,32 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
         });
         g->ko = ko;
         move_hi |= (1 << (MOVE_KO_BIT - 8));
-        tile_push(g->ko, ko_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko), g->width,
-                                 g->height));
     }
 ko_done:;
 
-    tile_commit();
+    if (!prefix_committed) {
+        if (g->ko != COORD_PASS) {
+            assert(g->ko == pending_single_capture &&
+                   "ko must be the sole captured coordinate");
+            board_animation_push(g->ko,
+                                 ko_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
+                                         g->width, g->height));
+            pending_single_capture = COORD_PASS;
+        }
+        board_animation_end_frame();
+        board_animation_commit();
+    }
+
+    if (pending_single_capture != COORD_PASS) {
+        board_animation_stream_push(
+            pending_single_capture,
+            surface_tile(BOARD_COL(pending_single_capture),
+                         BOARD_ROW(pending_single_capture), g->width,
+                         g->height),
+            &stream_pending);
+    }
+    board_animation_stream_flush(&stream_pending);
+
     if (g->move_count >= g->history_base + HISTORY_MAX)
         g->history_base++;
     /* Reassemble the full move_t from the 8-bit high byte (flags + coord
@@ -315,9 +399,76 @@ undo_result_t game_undo(game_t *g) {
     if (g->history_base > 0 && g->move_count <= g->history_base + 1)
         return UNDO_NO_HISTORY;
 
+    board_animation_wait_for(4);
+    assert(board_animation_tail == board_animation_committed &&
+           "previous board animation was not fully published");
+
+    const uint16_t old_ko = g->ko;
+    uint16_t last_coord = COORD_PASS;
+    uint8_t last_tile = 0;
+    uint8_t stream_pending = 0;
+
     g->move_count--;
     const move_t move = g->history[g->move_count % HISTORY_MAX];
     const uint16_t coord = MOVE_COORD(move);
+
+    /* Restore ko state.  The early-out above guarantees that when
+     * move_count > 0 the previous history entry is still valid. */
+    if (g->move_count == 0) {
+        g->ko = COORD_PASS;
+    } else {
+        const move_t prev = g->history[(g->move_count - 1) % HISTORY_MAX];
+        g->ko = COORD_PASS;
+        if (prev & (1u << MOVE_KO_BIT)) {
+            const uint16_t prev_coord = MOVE_COORD(prev);
+            uint16_t nb;
+            uint8_t dir_bit;
+            FOR_EACH_NEIGHBOR_DIR(prev_coord, nb, dir_bit, {
+                if (prev & ((uint16_t)dir_bit << MOVE_CAP_SHIFT))
+                    g->ko = nb;
+            });
+        }
+    }
+
+    if (g->move_count > g->history_base) {
+        const move_t last = g->history[(g->move_count - 1) % HISTORY_MAX];
+        last_coord = MOVE_COORD(last);
+        if (last_coord != COORD_PASS) {
+            last_tile =
+                (MOVE_COLOR(last) == COLOR_BLACK) ? TILE_LAST_B : TILE_LAST_W;
+        }
+    }
+
+    /*
+     * Publish the fixed-size state transition first: old ko removal,
+     * played-stone removal, restored ko, and restored last-move marker.
+     */
+    {
+        const uint8_t animation_start = board_animation_tail;
+
+        if (old_ko != COORD_PASS) {
+            board_animation_push(old_ko, surface_tile(BOARD_COL(old_ko),
+                                                      BOARD_ROW(old_ko),
+                                                      g->width, g->height));
+        }
+        if (coord != COORD_PASS) {
+            board_animation_push(coord, surface_tile(BOARD_COL(coord),
+                                                     BOARD_ROW(coord), g->width,
+                                                     g->height));
+        }
+        if (g->ko != COORD_PASS) {
+            board_animation_push(g->ko,
+                                 ko_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
+                                         g->width, g->height));
+        }
+        if (last_coord != COORD_PASS)
+            board_animation_push(last_coord, last_tile);
+
+        if (board_animation_tail != animation_start) {
+            board_animation_end_frame();
+            board_animation_commit();
+        }
+    }
 
     if (coord != COORD_PASS) {
         const color_t color = MOVE_COLOR(move);
@@ -341,7 +492,9 @@ undo_result_t game_undo(game_t *g) {
 
                 while (head < tail) {
                     const uint16_t pos = flood_deque[head++];
-                    tile_push(pos, opp_tile);
+                    board_animation_stream_push(
+                        pos, (pos == last_coord) ? last_tile : opp_tile,
+                        &stream_pending);
                     uint16_t adj;
                     FOR_EACH_NEIGHBOR(pos, adj, {
                         if (g->board[adj] == COLOR_EMPTY) {
@@ -353,48 +506,12 @@ undo_result_t game_undo(game_t *g) {
             }
         });
 
-        /* Remove the played stone. */
+        /* Keep the played point occupied until capture reconstruction ends. */
         g->board[coord] = COLOR_EMPTY;
-        tile_push(coord, surface_tile(BOARD_COL(coord), BOARD_ROW(coord),
-                                      g->width, g->height));
     }
 
-    /* Restore ko state.  The early-out above guarantees that when
-     * move_count > 0 the previous history entry is still valid. */
-    if (g->move_count == 0) {
-        g->ko = COORD_PASS;
-    } else {
-        const move_t prev = g->history[(g->move_count - 1) % HISTORY_MAX];
-        if (prev & (1u << MOVE_KO_BIT)) {
-            const uint16_t prev_coord = MOVE_COORD(prev);
-            uint16_t nb;
-            uint8_t dir_bit;
-            FOR_EACH_NEIGHBOR_DIR(prev_coord, nb, dir_bit, {
-                if (prev & ((uint16_t)dir_bit << MOVE_CAP_SHIFT))
-                    g->ko = nb;
-            });
-        } else {
-            g->ko = COORD_PASS;
-        }
-    }
+    board_animation_stream_flush(&stream_pending);
 
-    /* Write ko tile if the restored state has an active ko. */
-    if (g->ko != COORD_PASS) {
-        tile_push(g->ko, ko_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko), g->width,
-                                 g->height));
-    }
-
-    /* Mark the now-current last move as last-played. */
-    if (g->move_count > g->history_base) {
-        const move_t last = g->history[(g->move_count - 1) % HISTORY_MAX];
-        const uint16_t lc = MOVE_COORD(last);
-        if (lc != COORD_PASS) {
-            tile_push(lc, (MOVE_COLOR(last) == COLOR_BLACK) ? TILE_LAST_B
-                                                            : TILE_LAST_W);
-        }
-    }
-
-    tile_commit();
     return UNDO_OK;
 }
 

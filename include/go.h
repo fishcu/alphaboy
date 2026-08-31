@@ -79,7 +79,7 @@ typedef uint16_t move_t;
 
 #define MOVE_MAKE(coord, color)                                                \
     ((move_t)((coord) | ((move_t)(color) << MOVE_COLOR_BIT)))
-#define MOVE_COORD(m) ((m)&MOVE_COORD_MASK)
+#define MOVE_COORD(m) ((m) & MOVE_COORD_MASK)
 #define MOVE_COLOR(m) ((m) >> MOVE_COLOR_BIT)
 
 /* Maximum number of moves stored in history. */
@@ -90,7 +90,7 @@ typedef uint16_t move_t;
 /* Extract board-relative row / column (0-based, no margin) from a
  * packed coordinate.  Used in cold paths for surface tile lookups. */
 #define BOARD_ROW(pc) ((uint8_t)((pc) >> COORD_SHIFT) - BOARD_MARGIN)
-#define BOARD_COL(pc) ((uint8_t)((pc)&COORD_COL_MASK) - BOARD_MARGIN)
+#define BOARD_COL(pc) ((uint8_t)((pc) & COORD_COL_MASK) - BOARD_MARGIN)
 
 /* --- Coordinate helpers --- */
 

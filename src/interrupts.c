@@ -2,10 +2,29 @@
 #include <gb/hardware.h>
 #include <gb/isr.h>
 
+#include "board_animation.h"
+#include "cursor.h"
 #include "display.h"
 #include "go.h"
+#include "input.h"
 #include "interrupts.h"
 #include "memory.h"
+
+#define ACTION_BUTTON_MASK (J_A | J_B)
+#define BOARD_ANIMATION_VBL_WRITE()                                            \
+    do {                                                                       \
+        if (h == committed)                                                    \
+            goto board_animation_done;                                         \
+        command = board_animation_queue[h].tile;                               \
+        *(volatile uint8_t *)(0x9800u + board_animation_queue[h].pc) =         \
+            command & BOARD_ANIMATION_TILE_MASK;                               \
+        h = board_animation_next(h);                                           \
+        if (command & BOARD_ANIMATION_FRAME_END)                               \
+            goto board_animation_done;                                         \
+    } while (0)
+
+_Static_assert(BOARD_ANIMATION_MAX_WRITES_PER_FRAME == 4u,
+               "unrolled VBlank animation budget must stay at four writes");
 
 /* ---- HBlank vertical compression (timer-based) ----
  *
@@ -70,28 +89,47 @@ ISR_VECTOR(VECTOR_TIMER, timer_isr)
  * 1. Resets SCY to base_scy for the next frame's vertical compression.
  * 2. Re-syncs the hardware timer (TIMA, TMA, DIV) so the first
  *    timer overflow after VBlank lands correctly.
- * 3. Drains committed tile-queue entries to VRAM (freely accessible
- *    during VBlank).  Only committed entries are visible; speculative
- *    pushes from an in-progress move are not touched. */
-static void vbl_isr(void) NONBANKED {
+ * 3. Applies one committed board-animation step.
+ * 4. Samples input and advances the logical cursor target.
+ * 5. Updates shadow OAM and manually copies it to hardware OAM. */
+static void gameplay_vbl_isr(void) NONBANKED {
     SCY_REG = base_scy;
     TIMA_REG = timer_initial;
     TMA_REG = TIMER_TMA;
     DIV_REG = 0;
     IF_REG &= ~TIM_IFLAG;
 
-    uint8_t h = tile_queue_head;
-    const uint8_t com = tile_queue_committed;
-    uint8_t n = TILE_DRAIN_LIMIT;
-    while (h != com && n > 0) {
-        *(volatile uint8_t *)(0x9800u + tile_queue[h].pc) = tile_queue[h].tile;
-        h = (h + 1) % TILE_QUEUE_MAX;
-        n--;
+    {
+        uint8_t h = board_animation_head;
+        const uint8_t committed = board_animation_committed;
+        uint8_t command;
+
+        BOARD_ANIMATION_VBL_WRITE();
+        BOARD_ANIMATION_VBL_WRITE();
+        BOARD_ANIMATION_VBL_WRITE();
+        BOARD_ANIMATION_VBL_WRITE();
+    board_animation_done:
+        board_animation_head = h;
     }
-    tile_queue_head = h;
+
+    input_poll(game_input);
+
+    {
+        const uint8_t actions = game_input->pressed & ACTION_BUTTON_MASK;
+        if (actions != 0 && !game_action_busy && !game_action_pending) {
+            game_action_coord = BOARD_COORD(game_cursor->col, game_cursor->row);
+            game_action_pending = actions;
+        }
+    }
+
+    cursor_vbl_handle_input();
+    cursor_vbl_update_oam();
+    refresh_OAM();
 }
 
-void interrupts_init(uint8_t board_w, uint8_t board_h) {
+#undef BOARD_ANIMATION_VBL_WRITE
+
+void gameplay_interrupts_init(uint8_t board_w, uint8_t board_h) {
     const uint8_t offset_x = (SCREEN_W * 8 - board_w * CELL_W) / 2;
     const uint8_t offset_y =
         (SCREEN_H * 8 - board_h * CELL_H) / 2 - SCROLL_ADJUST_Y;
@@ -118,8 +156,11 @@ void interrupts_init(uint8_t board_w, uint8_t board_h) {
     TMA_REG = TIMER_TMA;
     TAC_REG = TIMER_TAC;
 
+    /* The custom VBlank handler updates shadow OAM before copying it. */
+    DISABLE_OAM_DMA;
+
     CRITICAL {
-        add_VBL(vbl_isr);
+        add_VBL(gameplay_vbl_isr);
         add_VBL(nowait_int_handler);
     }
     set_interrupts(VBL_IFLAG | TIM_IFLAG);
