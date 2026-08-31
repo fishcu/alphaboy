@@ -50,11 +50,18 @@ _Static_assert(BOARD_ANIMATION_MAX_WRITES_PER_FRAME == 4u,
  * so the dummy's SCY++ is absorbed before rendering begins.
  *
  * TIMER_CALIB: signed tick offset applied to the computed initial TIMA.
- *   Each unit = 1 tick = 4 M-cycles at 262 KHz. */
+ *   Each unit = 1 tick = 4 M-cycles at 262 KHz.
+ *
+ * The vcomp_demo reference resets the timer after GBDK's automatic OAM
+ * transfer.  This callback disables that transfer and resets before doing
+ * its manual transfer, so it starts 165 M-cycles earlier: the enabled OAM
+ * path takes 174 M-cycles while the disabled path takes 9.  Delaying by
+ * 41 timer ticks restores all but one M-cycle of the reference phase. */
 
 #define TIMER_TMA 0x38
 #define TIMER_TAC (TACF_START | TACF_262KHZ)
 #define TIMER_CALIB 10
+#define TIMER_EARLY_RESET_TICKS 41
 
 static uint8_t base_scy;
 static uint8_t timer_initial;
@@ -87,7 +94,7 @@ ISR_VECTOR(VECTOR_TIMER, timer_isr)
 
 /* ---- VBlank ISR ----
  * 1. Resets SCY to base_scy for the next frame's vertical compression.
- * 2. Re-syncs the hardware timer (TIMA, TMA, DIV) so the first
+ * 2. Re-syncs the hardware timer (TIMA, DIV) so the first
  *    timer overflow after VBlank lands correctly.
  * 3. Applies one committed board-animation step.
  * 4. Samples input and advances the logical cursor target.
@@ -95,7 +102,6 @@ ISR_VECTOR(VECTOR_TIMER, timer_isr)
 static void gameplay_vbl_isr(void) NONBANKED {
     SCY_REG = base_scy;
     TIMA_REG = timer_initial;
-    TMA_REG = TIMER_TMA;
     DIV_REG = 0;
     IF_REG &= ~TIM_IFLAG;
 
@@ -140,16 +146,17 @@ void gameplay_interrupts_init(uint8_t board_w, uint8_t board_h) {
 
     /* Precompute timer parameters for 262 KHz with dummy fire.
      * Total delay from VBL to first real fire = dummy_period + first_period.
-     * first_period = (256 - 0x39) * 4 = 796 (TMA flips to 0x39 after dummy).
-     * dummy_period = total_delay - 796.
+     * The dummy reloads TIMA from 0x38 before its ISR changes TMA to 0x39,
+     * so first_period = (256 - 0x38) * 4 = 800 M-cycles.
+     * dummy_period = total_delay - 800.
      * Each TIMER_CALIB unit = 1 tick = 4 M-cycles. */
     {
         const uint8_t first_line = offset_y - 1;
         const uint16_t delay =
             (uint16_t)7 * 114 + (uint16_t)first_line * 114 + 63;
-        const uint16_t dummy_delay =
-            delay - ((uint16_t)(256 - (TIMER_TMA ^ 1)) << 2);
-        const uint8_t ticks = (uint8_t)((dummy_delay + 3) >> 2) + TIMER_CALIB;
+        const uint16_t dummy_delay = delay - ((uint16_t)(256 - TIMER_TMA) << 2);
+        const uint8_t ticks = (uint8_t)((dummy_delay + 3) >> 2) + TIMER_CALIB +
+                              TIMER_EARLY_RESET_TICKS;
         timer_initial = (uint8_t)(0 - ticks);
     }
 
