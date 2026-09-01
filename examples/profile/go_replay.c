@@ -1,4 +1,5 @@
 #include "go_replay.h"
+#include "memory.h"
 
 /* Ishii Akane 2p vs Kato Keiko 6p, 26th Women's Meijin League
  * (2013-08-08), W+R. Move 304, W[gh], captures 48 stones.
@@ -88,22 +89,65 @@ static const uint8_t replay_moves[] = {
 
 #define REPLAY_MOVE_COUNT (sizeof(replay_moves) / 2)
 
+#define REPLAY_PHASE_PLAY 0
+#define REPLAY_PHASE_UNDO 1
+#define REPLAY_PHASE_DRAIN 2
+#define REPLAY_PHASE_DONE 3
+
 static uint16_t replay_index;
-static uint8_t replay_timer;
+static uint8_t replay_phase;
+
+static void replay_fail(void) {
+    while (1) {
+    }
+}
+
+static void replay_validate_empty(const game_t *g) {
+    if (g->move_count != 0 || g->history_base != 0 || g->ko != COORD_PASS)
+        replay_fail();
+
+    uint16_t row_coord = BOARD_COORD(0, 0);
+    for (uint8_t row = 0; row < g->height; row++) {
+        for (uint8_t col = 0; col < g->width; col++)
+            if (g->board[row_coord + col] != COLOR_EMPTY)
+                replay_fail();
+        row_coord += DIR_DOWN;
+    }
+}
 
 uint8_t go_replay_step(game_t *g) {
-    if (replay_index >= REPLAY_MOVE_COUNT)
+    if (replay_phase == REPLAY_PHASE_DONE)
         return 0;
 
-    if (++replay_timer < REPLAY_FRAME_INTERVAL)
-        return 0;
-    replay_timer = 0;
+    if (replay_phase == REPLAY_PHASE_DRAIN) {
+        if (board_animation_head != board_animation_committed)
+            return 0;
+
+        replay_validate_empty(g);
+        replay_phase = REPLAY_PHASE_DONE;
+        return 1;
+    }
+
+    if (replay_phase == REPLAY_PHASE_UNDO) {
+        if (game_undo(g) != UNDO_OK)
+            replay_fail();
+
+        if (--replay_index == 0)
+            replay_phase = REPLAY_PHASE_DRAIN;
+        return 1;
+    }
+
+    if (replay_index >= REPLAY_MOVE_COUNT)
+        replay_fail();
 
     const uint8_t col = replay_moves[replay_index * 2];
     const uint8_t row = replay_moves[replay_index * 2 + 1];
     const uint8_t color = game_color_to_play(g);
 
-    game_play_move(g, BOARD_COORD(col, row), color);
-    replay_index++;
+    if (game_play_move(g, BOARD_COORD(col, row), color) != MOVE_LEGAL)
+        replay_fail();
+
+    if (++replay_index == REPLAY_MOVE_COUNT)
+        replay_phase = REPLAY_PHASE_UNDO;
     return 1;
 }

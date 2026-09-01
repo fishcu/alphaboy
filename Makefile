@@ -55,15 +55,12 @@ endif
 # MBC5 + RAM + Battery (cart type 0x1B), 1 RAM bank (8 KB)
 LCCFLAGS = -Wm-yt0x1B -Wm-ya1 -I$(INCDIR) -I$(RESDIR)
 
-PROFILE_FPM ?= 5
-
 ifeq ($(BUILD),release)
 	LCCFLAGS += -DNDEBUG -Wf--opt-code-speed -Wf--max-allocs-per-node50000
 else ifeq ($(BUILD),relwithdebinfo)
 	LCCFLAGS += -debug -DNDEBUG -Wf--opt-code-speed -Wf--max-allocs-per-node50000
 else ifeq ($(BUILD),profile)
-	LCCFLAGS += -debug -DNDEBUG -Wf--opt-code-speed -Wf--max-allocs-per-node50000 \
-	            -DREPLAY_FRAME_INTERVAL=$(PROFILE_FPM)
+	LCCFLAGS += -debug -DNDEBUG -Wf--opt-code-speed -Wf--max-allocs-per-node50000
 else
 	LCCFLAGS += -debug -v
 endif
@@ -151,8 +148,8 @@ endif
 
 # ---- Flamegraph profiling ----
 # Builds the profile ROM, runs gb-flamegraph, outputs to build/flamegraph/.
-# PROFILE_FPM = frames per replay move (default 5)
-# The default window records the complete 318-move replay.
+# The replay plays and then undoes one move per frame, blocking as needed.
+# The default window records the complete 318-move round trip.
 # FLAME_START = first frame to record
 # FLAME_FRAMES = number of frames to record
 
@@ -162,7 +159,7 @@ GB_FLAMEGRAPH = npx --yes --package=$(GB_FLAMEGRAPH_PACKAGE) \
 FLAMEGRAPH_DIR = build/flamegraph
 PROFILE_ROM    = build/profile/$(PROJECTNAME).gb
 FLAME_START   ?= 0
-FLAME_FRAMES  ?= 1632
+FLAME_FRAMES  ?= 845
 
 flamegraph:
 	$(MAKE) BUILD=profile all

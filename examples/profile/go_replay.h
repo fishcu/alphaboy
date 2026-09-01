@@ -3,12 +3,8 @@
 
 #include "go.h"
 
-#ifndef REPLAY_FRAME_INTERVAL
-#define REPLAY_FRAME_INTERVAL 30
-#endif
-
-/* Advance the replay by one move if enough frames have elapsed.
- * Returns 1 if a move was played, 0 otherwise. */
+/* Advance the play/undo stress test by one action.
+ * Returns 1 when progress was made, 0 while draining or after completion. */
 uint8_t go_replay_step(game_t *g);
 
 #endif /* GO_REPLAY_H */
