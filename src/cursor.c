@@ -7,6 +7,11 @@
 
 #define FIXED_FRACTION(value) (((uint8_t *)&(value))[0])
 #define FIXED_PIXEL(value) (((uint8_t *)&(value))[1])
+#define HARDWARE_OAM ((volatile OAM_item_t *)0xFE00u)
+
+_Static_assert(CURSOR_SPR_UL == 0 && CURSOR_SPR_UR == 1 && CURSOR_SPR_LL == 2 &&
+                   CURSOR_SPR_LR == 3 && GHOST_SPR == 4,
+               "direct OAM layout requires cursor sprites 0 through 4");
 
 /* Compute target OAM X.
  * Board is drawn at BG tile (0,0) and centered via scroll registers.
@@ -191,19 +196,19 @@ static void draw_cursor(uint8_t px, uint16_t py_spread) __naked {
         add  a, e
         ld   d, a
 
-        ld   hl, #_shadow_OAM
+        ld   hl, #0xfe00
         ld   (hl), e
         inc  hl
         ld   (hl), b
-        ld   hl, #(_shadow_OAM + 4)
+        ld   hl, #0xfe04
         ld   (hl), e
         inc  hl
         ld   (hl), c
-        ld   hl, #(_shadow_OAM + 8)
+        ld   hl, #0xfe08
         ld   (hl), d
         inc  hl
         ld   (hl), b
-        ld   hl, #(_shadow_OAM + 12)
+        ld   hl, #0xfe0c
         ld   (hl), d
         inc  hl
         ld   (hl), c
@@ -217,7 +222,7 @@ void cursor_init(cursor_t *c, uint8_t col, uint8_t row, const game_t *g) {
     c->row = row;
     c->board_w = g->width;
     c->board_h = g->height;
-    c->ghost_visible = 0;
+    c->ghost_tile = 0;
     c->target_x = target_x(col, c->board_w);
     c->target_y = target_y(row, c->board_h);
     FIXED_FRACTION(c->x) = 0;
@@ -225,27 +230,25 @@ void cursor_init(cursor_t *c, uint8_t col, uint8_t row, const game_t *g) {
     FIXED_FRACTION(c->y) = 0;
     FIXED_PIXEL(c->y) = c->target_y;
 
-    /* Assign the cursor tile to all 4 corner sprites. */
-    set_sprite_tile(CURSOR_SPR_UL, TILE_CURSOR);
-    set_sprite_tile(CURSOR_SPR_UR, TILE_CURSOR);
-    set_sprite_tile(CURSOR_SPR_LL, TILE_CURSOR);
-    set_sprite_tile(CURSOR_SPR_LR, TILE_CURSOR);
-
-    /* Set flip attributes for each corner. */
-    set_sprite_prop(CURSOR_SPR_UL, 0);
-    set_sprite_prop(CURSOR_SPR_UR, S_FLIPX);
-    set_sprite_prop(CURSOR_SPR_LL, S_FLIPY);
-    set_sprite_prop(CURSOR_SPR_LR, S_FLIPX | S_FLIPY);
-
     const uint8_t px = FIXED_PIXEL(c->x);
     const uint8_t py = FIXED_PIXEL(c->y);
-    move_sprite(CURSOR_SPR_UL, px - 2, py - 1);
-    move_sprite(CURSOR_SPR_UR, px + 1, py - 1);
-    move_sprite(CURSOR_SPR_LL, px - 2, py + 2);
-    move_sprite(CURSOR_SPR_LR, px + 1, py + 2);
-    move_sprite(GHOST_SPR, px, py + 1);
 
     cursor_refresh_ghost(c, g);
+
+    /* The display is off during initialization, so hardware OAM is writable. */
+    draw_cursor(px, py);
+    HARDWARE_OAM[CURSOR_SPR_UL].tile = TILE_CURSOR;
+    HARDWARE_OAM[CURSOR_SPR_UL].prop = 0;
+    HARDWARE_OAM[CURSOR_SPR_UR].tile = TILE_CURSOR;
+    HARDWARE_OAM[CURSOR_SPR_UR].prop = S_FLIPX;
+    HARDWARE_OAM[CURSOR_SPR_LL].tile = TILE_CURSOR;
+    HARDWARE_OAM[CURSOR_SPR_LL].prop = S_FLIPY;
+    HARDWARE_OAM[CURSOR_SPR_LR].tile = TILE_CURSOR;
+    HARDWARE_OAM[CURSOR_SPR_LR].prop = S_FLIPX | S_FLIPY;
+    HARDWARE_OAM[GHOST_SPR].x = px;
+    HARDWARE_OAM[GHOST_SPR].tile = c->ghost_tile;
+    HARDWARE_OAM[GHOST_SPR].prop = S_PALETTE;
+    HARDWARE_OAM[GHOST_SPR].y = py + 1;
 }
 
 void cursor_vbl_handle_input(void) {
@@ -254,24 +257,24 @@ void cursor_vbl_handle_input(void) {
     if ((trigger & J_LEFT) && game_cursor->col > 0) {
         game_cursor->col--;
         game_cursor->target_x -= CELL_W;
-        game_cursor->ghost_visible = 0;
+        game_cursor->ghost_tile = 0;
     }
     if ((trigger & J_RIGHT) &&
         game_cursor->col < (uint8_t)(game_cursor->board_w - 1u)) {
         game_cursor->col++;
         game_cursor->target_x += CELL_W;
-        game_cursor->ghost_visible = 0;
+        game_cursor->ghost_tile = 0;
     }
     if ((trigger & J_UP) && game_cursor->row > 0) {
         game_cursor->row--;
         game_cursor->target_y -= CELL_H;
-        game_cursor->ghost_visible = 0;
+        game_cursor->ghost_tile = 0;
     }
     if ((trigger & J_DOWN) &&
         game_cursor->row < (uint8_t)(game_cursor->board_h - 1u)) {
         game_cursor->row++;
         game_cursor->target_y += CELL_H;
-        game_cursor->ghost_visible = 0;
+        game_cursor->ghost_tile = 0;
     }
 }
 
@@ -307,12 +310,14 @@ update_ghost:
      * The logical board may be ahead of a capture animation.  Keep the
      * ghost hidden until queued board visuals catch up.
      */
-    if (game_cursor->ghost_visible && !game_action_busy &&
-        board_animation_head == board_animation_committed)
-        move_sprite(GHOST_SPR, game_cursor->target_x,
-                    game_cursor->target_y + 1);
-    else
-        move_sprite(GHOST_SPR, 0, 0);
+    if (game_cursor->ghost_tile != 0 && !game_action_busy &&
+        board_animation_head == board_animation_committed) {
+        HARDWARE_OAM[GHOST_SPR].x = game_cursor->target_x;
+        HARDWARE_OAM[GHOST_SPR].tile = game_cursor->ghost_tile;
+        HARDWARE_OAM[GHOST_SPR].y = game_cursor->target_y + 1;
+    } else {
+        HARDWARE_OAM[GHOST_SPR].y = 0;
+    }
 }
 
 void cursor_refresh_ghost(cursor_t *c, const game_t *g) {
@@ -327,10 +332,8 @@ void cursor_refresh_ghost(cursor_t *c, const game_t *g) {
     if (game_can_play_approx(g, col, row)) {
         const uint8_t black = (game_color_to_play(g) == COLOR_BLACK);
         OBP1_REG = black ? DMG_PALETTE(0, 1, 2, 3) : DMG_PALETTE(0, 0, 1, 2);
-        set_sprite_tile(GHOST_SPR, black ? TILE_SPR_STONE_B : TILE_SPR_STONE_W);
-        set_sprite_prop(GHOST_SPR, S_PALETTE);
-        c->ghost_visible = 1;
+        c->ghost_tile = black ? TILE_SPR_STONE_B : TILE_SPR_STONE_W;
     } else {
-        c->ghost_visible = 0;
+        c->ghost_tile = 0;
     }
 }

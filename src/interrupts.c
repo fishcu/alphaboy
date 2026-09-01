@@ -98,7 +98,7 @@ ISR_VECTOR(VECTOR_TIMER, timer_isr)
  *    timer overflow after VBlank lands correctly.
  * 3. Applies one committed board-animation step.
  * 4. Samples input and advances the logical cursor target.
- * 5. Updates shadow OAM and manually copies it to hardware OAM. */
+ * 5. Updates the five gameplay sprites directly in hardware OAM. */
 static void gameplay_vbl_isr(void) NONBANKED {
     SCY_REG = base_scy;
     TIMA_REG = timer_initial;
@@ -130,7 +130,6 @@ static void gameplay_vbl_isr(void) NONBANKED {
 
     cursor_vbl_handle_input();
     cursor_vbl_update_oam();
-    refresh_OAM();
 }
 
 #undef BOARD_ANIMATION_VBL_WRITE
@@ -163,7 +162,7 @@ void gameplay_interrupts_init(uint8_t board_w, uint8_t board_h) {
     TMA_REG = TIMER_TMA;
     TAC_REG = TIMER_TAC;
 
-    /* The custom VBlank handler updates shadow OAM before copying it. */
+    /* Gameplay writes its five sprites directly during VBlank. */
     DISABLE_OAM_DMA;
 
     CRITICAL {
