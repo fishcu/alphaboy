@@ -5,12 +5,12 @@
 
 #include "go.h"
 
-/* Return the board-surface tile index for an empty intersection. */
-uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h);
+/* Return the board-surface tile index for an empty packed coordinate. */
+uint8_t surface_tile(uint16_t coord);
 
 /* Return the ko-marked variant of a surface tile for an empty
  * intersection.  Maps hoshi to the center ko tile. */
-uint8_t ko_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h);
+uint8_t ko_tile(uint16_t coord);
 
 /* Full board redraw  --  used only at init (display off, fast).
  * Draws the decorative frame and all intersections.

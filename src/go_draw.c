@@ -1,59 +1,46 @@
 #include "go_draw.h"
 
+#include "board_surfaces.h"
 #include "display.h"
 #include "vram.h"
 
-uint8_t surface_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
-    const uint8_t top = (row == 0);
-    const uint8_t bottom = (row == h - 1);
-    const uint8_t left = (col == 0);
-    const uint8_t right = (col == w - 1);
+_Static_assert(TILE_HOSHI == TILE_CORNER_TL + 9,
+               "surface tile kinds must be contiguous");
+_Static_assert(TILE_KO_BR == TILE_KO_TL + 8,
+               "ko surface tiles must be contiguous");
 
-    if (top) {
-        if (left)
-            return TILE_CORNER_TL;
-        if (right)
-            return TILE_CORNER_TR;
-        return TILE_EDGE_T;
-    }
-    if (bottom) {
-        if (left)
-            return TILE_CORNER_BL;
-        if (right)
-            return TILE_CORNER_BR;
-        return TILE_EDGE_B;
-    }
-    if (left)
-        return TILE_EDGE_L;
-    if (right)
-        return TILE_EDGE_R;
+static const uint8_t *board_surface;
 
-    /* Star-point (hoshi) check for interior intersections.
-     * >= 13: 4th line from edge, corners + sides + center.
-     * < 13:  3rd line from edge, corners + center only. */
-    const uint8_t d = (w >= 13 && h >= 13) ? 3 : 2;
-    const uint8_t on_col = (col == d || col == w - 1 - d || col == w / 2);
-    const uint8_t on_row = (row == d || row == h - 1 - d || row == h / 2);
-    if (on_col && on_row) {
-        if (w >= 13 && h >= 13)
-            return TILE_HOSHI;
-        if ((col == w / 2) == (row == h / 2))
-            return TILE_HOSHI;
-    }
-
-    return TILE_CENTER;
+static void board_surface_select(uint8_t size) {
+    if (size == BOARD_SIZE_9)
+        board_surface = board_surface_9;
+    else if (size == BOARD_SIZE_13)
+        board_surface = board_surface_13;
+    else
+        board_surface = board_surface_19;
 }
 
-uint8_t ko_tile(uint8_t col, uint8_t row, uint8_t w, uint8_t h) {
-    uint8_t t = surface_tile(col, row, w, h);
-    if (t == TILE_HOSHI)
-        t = TILE_CENTER;
-    return t + (TILE_KO_TL - TILE_CORNER_TL);
+static uint8_t surface_kind(uint16_t coord) {
+    const uint8_t packed = board_surface[coord >> 1];
+    return (coord & 1u) ? (packed >> 4) : (packed & 0x0Fu);
+}
+
+uint8_t surface_tile(uint16_t coord) {
+    return TILE_CORNER_TL + surface_kind(coord);
+}
+
+uint8_t ko_tile(uint16_t coord) {
+    uint8_t kind = surface_kind(coord);
+    if (kind == TILE_HOSHI - TILE_CORNER_TL)
+        kind = TILE_CENTER - TILE_CORNER_TL;
+    return TILE_KO_TL + kind;
 }
 
 void board_redraw(const game_t *g) {
     const uint8_t w = g->width;
     const uint8_t h = g->height;
+
+    board_surface_select(w);
 
     /* ---- Frame ---- */
 
@@ -97,7 +84,7 @@ void board_redraw(const game_t *g) {
                 tile = TILE_STONE_W;
                 break;
             default:
-                tile = surface_tile(col, row, w, h);
+                tile = surface_tile(p);
                 break;
             }
             vram_set_tile(p, tile);

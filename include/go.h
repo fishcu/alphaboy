@@ -3,9 +3,12 @@
 
 #include <stdint.h>
 
-/* Maximum supported board dimensions. */
-#define BOARD_MIN_SIZE 5
-#define BOARD_MAX_SIZE 19
+/* Supported square board dimensions. */
+#define BOARD_SIZE_9 9
+#define BOARD_SIZE_13 13
+#define BOARD_SIZE_19 19
+#define BOARD_MIN_SIZE BOARD_SIZE_9
+#define BOARD_MAX_SIZE BOARD_SIZE_19
 
 /* Maximum number of playable intersections. */
 #define BOARD_POSITIONS (BOARD_MAX_SIZE * BOARD_MAX_SIZE)
@@ -121,9 +124,9 @@ typedef struct game {
 #define DIR_LEFT (-1)
 #define DIR_RIGHT (1)
 
-/* Reset game to an empty board of the given dimensions.
+/* Reset game to an empty 9x9, 13x13, or 19x19 board.
  * komi2 is 2*komi (e.g. 13 for 6.5 komi). Clears ko and history.
- * Asserts that width and height are in [BOARD_MIN_SIZE, BOARD_MAX_SIZE]. */
+ * Asserts that width and height match a supported square size. */
 void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2);
 
 /* Play a pass for `color`.  Clears ko and records the pass in history. */

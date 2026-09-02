@@ -28,20 +28,20 @@ _Static_assert(BOARD_ANIMATION_STREAM_CHUNK < BOARD_ANIMATION_QUEUE_MAX - 1u,
 _Static_assert(BOARD_ANIMATION_MAX_WRITES_PER_FRAME >= 4u,
                "VBlank budget must fit the largest immediate group");
 
-static inline uint8_t board_animation_next(uint8_t index) {
-    return (index + 1u) & (BOARD_ANIMATION_QUEUE_MAX - 1u);
+inline uint8_t board_animation_next(uint8_t index) {
+    return (uint8_t)((index + 1u) & (BOARD_ANIMATION_QUEUE_MAX - 1u));
 }
 
-static inline uint8_t board_animation_free(void) {
-    return (board_animation_head - board_animation_tail - 1u) &
-           (BOARD_ANIMATION_QUEUE_MAX - 1u);
+inline uint8_t board_animation_free(void) {
+    return (uint8_t)((board_animation_head - board_animation_tail - 1u) &
+                     (BOARD_ANIMATION_QUEUE_MAX - 1u));
 }
 
 /*
  * Reserve bounded speculative space before mutating game state.  The
  * consumer may only increase available space while this producer waits.
  */
-static inline void board_animation_wait_for(uint8_t count) {
+inline void board_animation_wait_for(uint8_t count) {
     assert(count < BOARD_ANIMATION_QUEUE_MAX &&
            "reservation must fit animation queue");
     while (board_animation_free() < count) {
@@ -49,35 +49,35 @@ static inline void board_animation_wait_for(uint8_t count) {
 }
 
 /* Append one uncommitted command. */
-static inline void board_animation_push(uint16_t pc, uint8_t tile) {
-    const uint8_t t = board_animation_tail;
-    const uint8_t next = board_animation_next(t);
+inline void board_animation_push(uint16_t pc, uint8_t tile) {
+    const uint8_t tail = board_animation_tail;
+    const uint8_t next = board_animation_next(tail);
     while (next == board_animation_head) {
     }
-    board_animation_queue[t].pc = pc;
-    board_animation_queue[t].tile = tile;
+    board_animation_queue[tail].pc = pc;
+    board_animation_queue[tail].tile = tile;
     board_animation_tail = next;
 }
 
 /* Append one command which ends the current animation step. */
-static inline void board_animation_push_paced(uint16_t pc, uint8_t tile) {
+inline void board_animation_push_paced(uint16_t pc, uint8_t tile) {
     board_animation_push(pc, tile | BOARD_ANIMATION_FRAME_END);
 }
 
 /* End the frame after the most recently staged command. */
-static inline void board_animation_end_frame(void) {
+inline void board_animation_end_frame(void) {
     const uint8_t last =
         (board_animation_tail - 1u) & (BOARD_ANIMATION_QUEUE_MAX - 1u);
     board_animation_queue[last].tile |= BOARD_ANIMATION_FRAME_END;
 }
 
 /* Make all staged commands visible to VBlank. */
-static inline void board_animation_commit(void) {
+inline void board_animation_commit(void) {
     board_animation_committed = board_animation_tail;
 }
 
 /* Discard all staged commands. */
-static inline void board_animation_rewind(void) {
+inline void board_animation_rewind(void) {
     board_animation_tail = board_animation_committed;
 }
 
@@ -85,8 +85,8 @@ static inline void board_animation_rewind(void) {
  * Stream finalized board changes without allowing an uncommitted chunk to
  * fill the ring.  Call board_animation_stream_flush() at the end.
  */
-static inline void board_animation_stream_push(uint16_t pc, uint8_t tile,
-                                               uint8_t *pending) {
+inline void board_animation_stream_push(uint16_t pc, uint8_t tile,
+                                        uint8_t *pending) {
     board_animation_push_paced(pc, tile);
     (*pending)++;
     if (*pending == BOARD_ANIMATION_STREAM_CHUNK) {
@@ -95,7 +95,7 @@ static inline void board_animation_stream_push(uint16_t pc, uint8_t tile,
     }
 }
 
-static inline void board_animation_stream_flush(uint8_t *pending) {
+inline void board_animation_stream_flush(uint8_t *pending) {
     if (*pending != 0) {
         board_animation_commit();
         *pending = 0;

@@ -22,6 +22,10 @@ SRCDIR     = src
 INCDIR     = include
 RESDIR     = res
 PROFILEDIR = examples/profile
+TOOLSDIR   = tools
+
+BOARD_SURFACES          = $(RESDIR)/board_surfaces.h
+BOARD_SURFACE_GENERATOR = $(TOOLSDIR)/generate_board_surfaces.js
 
 # ---- Build configuration ----
 # BUILD = debug          (default) debug symbols, verbose, no optimisation
@@ -84,6 +88,8 @@ $(BINS): $(OBJS)
 $(OBJDIR)/%.o: $(SRCDIR)/%.c
 	$(LCC) $(LCCFLAGS) -c -o $@ $<
 
+$(OBJDIR)/go_draw.o: $(BOARD_SURFACES)
+
 # Compile res/*.c
 $(OBJDIR)/%.o: $(RESDIR)/%.c
 	$(LCC) $(LCCFLAGS) -c -o $@ $<
@@ -98,10 +104,15 @@ $(OBJDIR)/%.o: $(PROFILEDIR)/%.c
 
 # ---- Asset conversion ----
 
-assets: $(RESDIR)/tiles.c
+assets: $(RESDIR)/tiles.c $(BOARD_SURFACES)
 
 $(RESDIR)/tiles.c: assets/tiles.png
 	$(PNG2ASSET) $< -o $@ -map -keep_palette_order -noflip
+
+$(BOARD_SURFACES): $(BOARD_SURFACE_GENERATOR)
+	node $(BOARD_SURFACE_GENERATOR) $(BOARD_SURFACES)
+
+board-surfaces: $(BOARD_SURFACES)
 
 # ---- Utility targets ----
 
@@ -182,4 +193,4 @@ else
 	-$(RMDIR) build
 endif
 
-.PHONY: all dirs assets run format flamegraph clean
+.PHONY: all dirs assets board-surfaces run format flamegraph clean

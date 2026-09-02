@@ -114,12 +114,10 @@ static inline uint8_t flood_next_generation(void) {
         });                                                                    \
     }
 
-/* Flood-fill for opponent-capture probing.  Returns 1 immediately on the first
- * liberty found.  If it returns 0, flood_deque[0..group_size-1] contains the
- * fully traversed captured group. */
-static uint8_t group_has_liberty_capture(const game_t *g, uint16_t seed,
-                                         uint8_t stone_color,
-                                         uint16_t *group_size) {
+/* Returns 1 immediately on the first liberty found.  If it returns 0,
+ * flood_deque[0..group_size-1] contains the fully traversed dead group. */
+static uint8_t group_has_liberty(const game_t *g, uint16_t seed,
+                                 uint8_t stone_color, uint16_t *group_size) {
     uint16_t head = 0;
     uint16_t tail = 0;
     const uint8_t generation = flood_next_generation();
@@ -132,28 +130,13 @@ static uint8_t group_has_liberty_capture(const game_t *g, uint16_t seed,
     return 0;
 }
 
-/* Flood-fill for suicide checking.  Returns 1 immediately on the first
- * liberty found, 0 if the played group is dead. */
-static uint8_t group_has_liberty(const game_t *g, uint16_t seed,
-                                 uint8_t stone_color) {
-    uint16_t head = 0;
-    uint16_t tail = 0;
-    const uint8_t generation = flood_next_generation();
-
-    flood_visited[seed] = generation;
-    flood_deque[tail++] = seed;
-
-    GROUP_HAS_LIBERTY_CORE();
-    return 0;
-}
-
 #undef GROUP_HAS_LIBERTY_CORE
 
 void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
-    assert(width >= BOARD_MIN_SIZE && width <= BOARD_MAX_SIZE &&
-           "width out of range");
-    assert(height >= BOARD_MIN_SIZE && height <= BOARD_MAX_SIZE &&
-           "height out of range");
+    assert(width == height && "board must be square");
+    assert((width == BOARD_SIZE_9 || width == BOARD_SIZE_13 ||
+            width == BOARD_SIZE_19) &&
+           "unsupported board size");
 
     g->width = width;
     g->height = height;
@@ -199,11 +182,8 @@ void game_play_pass(game_t *g, color_t color) {
         }
     }
 
-    if (g->ko != COORD_PASS) {
-        board_animation_push(g->ko,
-                             surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
-                                          g->width, g->height));
-    }
+    if (g->ko != COORD_PASS)
+        board_animation_push(g->ko, surface_tile(g->ko));
     if (board_animation_tail != animation_start) {
         board_animation_end_frame();
         board_animation_commit();
@@ -259,11 +239,8 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
     }
 
     /* Clear previous ko marker tile. */
-    if (g->ko != COORD_PASS) {
-        board_animation_push(g->ko,
-                             surface_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
-                                          g->width, g->height));
-    }
+    if (g->ko != COORD_PASS)
+        board_animation_push(g->ko, surface_tile(g->ko));
 
     /* Mark new last-played stone. */
     board_animation_push(coord,
@@ -281,7 +258,7 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
                 g->board[nb + DIR_LEFT] != COLOR_EMPTY &&
                 g->board[nb + DIR_RIGHT] != COLOR_EMPTY) {
                 uint16_t group_size;
-                if (!group_has_liberty_capture(g, nb, opp_color, &group_size)) {
+                if (!group_has_liberty(g, nb, opp_color, &group_size)) {
                     move_hi |= dir_bit << (MOVE_CAP_SHIFT - 8);
 
                     /*
@@ -303,9 +280,7 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
                         if (captured_total == 1) {
                             board_animation_stream_push(
                                 pending_single_capture,
-                                surface_tile(BOARD_COL(pending_single_capture),
-                                             BOARD_ROW(pending_single_capture),
-                                             g->width, g->height),
+                                surface_tile(pending_single_capture),
                                 &stream_pending);
                             pending_single_capture = COORD_PASS;
                         }
@@ -314,11 +289,8 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
                         for (uint16_t i = 0; i < group_size; i++) {
                             const uint16_t cap = flood_deque[i];
                             g->board[cap] = COLOR_EMPTY;
-                            board_animation_stream_push(
-                                cap,
-                                surface_tile(BOARD_COL(cap), BOARD_ROW(cap),
-                                             g->width, g->height),
-                                &stream_pending);
+                            board_animation_stream_push(cap, surface_tile(cap),
+                                                        &stream_pending);
                         }
                     }
                 }
@@ -332,7 +304,7 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
         g->board[coord + DIR_DOWN] != COLOR_EMPTY &&
         g->board[coord + DIR_LEFT] != COLOR_EMPTY &&
         g->board[coord + DIR_RIGHT] != COLOR_EMPTY) {
-        if (!group_has_liberty(g, coord, own_color)) {
+        if (!group_has_liberty(g, coord, own_color, &nb)) {
             board_animation_rewind();
             g->board[coord] = COLOR_EMPTY;
             return MOVE_SUICIDAL;
@@ -365,9 +337,7 @@ ko_done:;
         if (g->ko != COORD_PASS) {
             assert(g->ko == pending_single_capture &&
                    "ko must be the sole captured coordinate");
-            board_animation_push(g->ko,
-                                 ko_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
-                                         g->width, g->height));
+            board_animation_push(g->ko, ko_tile(g->ko));
             pending_single_capture = COORD_PASS;
         }
         board_animation_end_frame();
@@ -375,12 +345,9 @@ ko_done:;
     }
 
     if (pending_single_capture != COORD_PASS) {
-        board_animation_stream_push(
-            pending_single_capture,
-            surface_tile(BOARD_COL(pending_single_capture),
-                         BOARD_ROW(pending_single_capture), g->width,
-                         g->height),
-            &stream_pending);
+        board_animation_stream_push(pending_single_capture,
+                                    surface_tile(pending_single_capture),
+                                    &stream_pending);
     }
     board_animation_stream_flush(&stream_pending);
 
@@ -391,6 +358,41 @@ ko_done:;
     g->history[g->move_count++ % HISTORY_MAX] =
         ((move_t)move_hi << 8) | (uint8_t)coord;
     return MOVE_LEGAL;
+}
+
+typedef struct captured_restore {
+    uint8_t *board;
+    uint16_t last_coord;
+    uint8_t last_tile;
+    uint8_t opp_color;
+    uint8_t opp_tile;
+    uint8_t stream_pending;
+} captured_restore_t;
+
+/* Restore one group recorded by a capture-direction flag. */
+static void restore_captured_group(captured_restore_t *restore, uint16_t seed) {
+    uint16_t head = 0;
+    uint16_t tail = 0;
+    uint8_t *const board = restore->board;
+
+    flood_deque[tail++] = seed;
+    board[seed] = restore->opp_color;
+
+    while (head < tail) {
+        const uint16_t pos = flood_deque[head++];
+        board_animation_stream_push(pos,
+                                    (pos == restore->last_coord)
+                                        ? restore->last_tile
+                                        : restore->opp_tile,
+                                    &restore->stream_pending);
+        uint16_t adj;
+        FOR_EACH_NEIGHBOR(pos, adj, {
+            if (board[adj] == COLOR_EMPTY) {
+                board[adj] = restore->opp_color;
+                flood_deque[tail++] = adj;
+            }
+        });
+    }
 }
 
 undo_result_t game_undo(game_t *g) {
@@ -406,7 +408,6 @@ undo_result_t game_undo(game_t *g) {
     const uint16_t old_ko = g->ko;
     uint16_t last_coord = COORD_PASS;
     uint8_t last_tile = 0;
-    uint8_t stream_pending = 0;
 
     g->move_count--;
     const move_t move = g->history[g->move_count % HISTORY_MAX];
@@ -446,21 +447,12 @@ undo_result_t game_undo(game_t *g) {
     {
         const uint8_t animation_start = board_animation_tail;
 
-        if (old_ko != COORD_PASS) {
-            board_animation_push(old_ko, surface_tile(BOARD_COL(old_ko),
-                                                      BOARD_ROW(old_ko),
-                                                      g->width, g->height));
-        }
-        if (coord != COORD_PASS) {
-            board_animation_push(coord, surface_tile(BOARD_COL(coord),
-                                                     BOARD_ROW(coord), g->width,
-                                                     g->height));
-        }
-        if (g->ko != COORD_PASS) {
-            board_animation_push(g->ko,
-                                 ko_tile(BOARD_COL(g->ko), BOARD_ROW(g->ko),
-                                         g->width, g->height));
-        }
+        if (old_ko != COORD_PASS)
+            board_animation_push(old_ko, surface_tile(old_ko));
+        if (coord != COORD_PASS)
+            board_animation_push(coord, surface_tile(coord));
+        if (g->ko != COORD_PASS)
+            board_animation_push(g->ko, ko_tile(g->ko));
         if (last_coord != COORD_PASS)
             board_animation_push(last_coord, last_tile);
 
@@ -471,46 +463,32 @@ undo_result_t game_undo(game_t *g) {
     }
 
     if (coord != COORD_PASS) {
-        const color_t color = MOVE_COLOR(move);
-        const color_t opp_color = COLOR_OPPOSITE(color);
-        const uint8_t opp_tile =
-            (color == COLOR_BLACK) ? TILE_STONE_W : TILE_STONE_B;
+        if (move & (0x0Fu << MOVE_CAP_SHIFT)) {
+            const color_t color = MOVE_COLOR(move);
+            const color_t opp_color = COLOR_OPPOSITE(color);
+            const uint8_t opp_tile =
+                (color == COLOR_BLACK) ? TILE_STONE_W : TILE_STONE_B;
+            captured_restore_t restore = {g->board,  last_coord, last_tile,
+                                          opp_color, opp_tile,   0};
 
-        /* Restore captured groups by flood-filling through empties.
-         * Each captured group's empty region is fully enclosed by the
-         * capturing player's stones and the board edge, so a BFS from
-         * the capture-direction neighbor recovers exactly the group. */
-        uint16_t nb;
-        uint8_t dir_bit;
-        FOR_EACH_NEIGHBOR_DIR(coord, nb, dir_bit, {
-            if (move & ((uint16_t)dir_bit << MOVE_CAP_SHIFT)) {
-                uint16_t head = 0;
-                uint16_t tail = 0;
+            /* Restore captured groups by flood-filling through empties.
+             * Each captured group's empty region is fully enclosed by the
+             * capturing player's stones and the board edge, so a BFS from
+             * the capture-direction neighbor recovers exactly the group. */
+            uint16_t nb;
+            uint8_t dir_bit;
+            FOR_EACH_NEIGHBOR_DIR(coord, nb, dir_bit, {
+                if (move & ((uint16_t)dir_bit << MOVE_CAP_SHIFT))
+                    restore_captured_group(&restore, nb);
+            });
 
-                flood_deque[tail++] = nb;
-                g->board[nb] = opp_color;
-
-                while (head < tail) {
-                    const uint16_t pos = flood_deque[head++];
-                    board_animation_stream_push(
-                        pos, (pos == last_coord) ? last_tile : opp_tile,
-                        &stream_pending);
-                    uint16_t adj;
-                    FOR_EACH_NEIGHBOR(pos, adj, {
-                        if (g->board[adj] == COLOR_EMPTY) {
-                            g->board[adj] = opp_color;
-                            flood_deque[tail++] = adj;
-                        }
-                    });
-                }
-            }
-        });
-
-        /* Keep the played point occupied until capture reconstruction ends. */
-        g->board[coord] = COLOR_EMPTY;
+            /* Keep the played point occupied until reconstruction ends. */
+            g->board[coord] = COLOR_EMPTY;
+            board_animation_stream_flush(&restore.stream_pending);
+        } else {
+            g->board[coord] = COLOR_EMPTY;
+        }
     }
-
-    board_animation_stream_flush(&stream_pending);
 
     return UNDO_OK;
 }
