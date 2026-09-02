@@ -130,6 +130,25 @@ static uint8_t group_has_liberty(const game_t *g, uint16_t seed,
     return 0;
 }
 
+/* Return the directions from center whose neighboring stones were reached
+ * by the latest flood.  A reached contact belongs to the same group and may
+ * be skipped after that group has been proven to have a liberty. */
+static uint8_t flood_reached_directions(uint16_t center) {
+    uint8_t directions = 0;
+    const uint8_t generation = flood_generation;
+    const uint8_t *const visited = flood_visited + center;
+
+    if (visited[DIR_UP] == generation)
+        directions |= 1;
+    if (visited[DIR_DOWN] == generation)
+        directions |= 2;
+    if (visited[DIR_LEFT] == generation)
+        directions |= 4;
+    if (visited[DIR_RIGHT] == generation)
+        directions |= 8;
+    return directions;
+}
+
 #undef GROUP_HAS_LIBERTY_CORE
 
 void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
@@ -219,6 +238,7 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
     uint8_t captured_total = 0;
     uint8_t stream_pending = 0;
     uint8_t prefix_committed = 0;
+    uint8_t resolved_directions = 0;
     uint16_t pending_single_capture = COORD_PASS;
 
     /* ---- Speculative animation prefix (uncommitted) ----
@@ -251,14 +271,15 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
     uint16_t nb;
     uint8_t dir_bit;
     FOR_EACH_NEIGHBOR_DIR(coord, nb, dir_bit, {
-        const uint8_t cell = g->board[nb];
-        if (cell == opp_color) {
+        if (!(resolved_directions & dir_bit) && g->board[nb] == opp_color) {
             if (g->board[nb + DIR_UP] != COLOR_EMPTY &&
                 g->board[nb + DIR_DOWN] != COLOR_EMPTY &&
                 g->board[nb + DIR_LEFT] != COLOR_EMPTY &&
                 g->board[nb + DIR_RIGHT] != COLOR_EMPTY) {
                 uint16_t group_size;
-                if (!group_has_liberty(g, nb, opp_color, &group_size)) {
+                if (group_has_liberty(g, nb, opp_color, &group_size)) {
+                    resolved_directions |= flood_reached_directions(coord);
+                } else {
                     move_hi |= dir_bit << (MOVE_CAP_SHIFT - 8);
 
                     /*
