@@ -88,7 +88,7 @@ static void flood_clear(uint8_t *p) __naked {
 
 /* Advance to a fresh flood generation.  On wrap to 0, clear the visited
  * array and restart from 1. */
-static inline uint8_t flood_next_generation(void) {
+inline uint8_t flood_next_generation(void) {
     flood_generation++;
     if (flood_generation == 0) {
         flood_clear(flood_visited);

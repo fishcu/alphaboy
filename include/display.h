@@ -137,9 +137,9 @@ enum {
 /*  Display lifecycle                                                 */
 /* ------------------------------------------------------------------ */
 
-/* Configure LCDC addressing mode, load palettes and tile data,
- * and fill the BG map.  Assumes the display is already off and
- * SRAM is enabled.  Call before board_redraw and interrupts_init. */
+/* Configure LCDC addressing mode and load palettes and tile data.
+ * Assumes the display is already off and SRAM is enabled.
+ * Call before board_redraw and interrupts_init. */
 void display_init(void);
 
 /* Turn on BG, sprites, and the display.
