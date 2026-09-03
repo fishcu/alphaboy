@@ -17,6 +17,10 @@ _Static_assert(CURSOR_EASING_MAX_INDEX >= SCREEN_W * 16u,
                "cursor easing LUT must span the full screen width");
 _Static_assert(CURSOR_EASING_MIN_STEP == CURSOR_MIN_STEP,
                "cursor easing LUT minimum step mismatch");
+_Static_assert(COLOR_BLACK == 0u && COLOR_WHITE == 1u,
+               "ghost tile arithmetic requires consecutive colors");
+_Static_assert(TILE_SPR_STONE_W == TILE_SPR_STONE_B + 1u,
+               "ghost stone sprite tiles must be consecutive");
 
 /* Compute target OAM X.
  * Board is drawn at BG tile (0,0) and centered via scroll registers.
@@ -206,13 +210,21 @@ static void draw_cursor(uint8_t px, uint16_t py_spread) __naked {
 }
 // clang-format on
 
+inline uint8_t ghost_can_play(void) {
+    const uint16_t coord = board_coord(game_cursor->col, game_cursor->row);
+
+    if (game_state->board[coord] != COLOR_EMPTY)
+        return 0;
+    return coord != game_state->ko;
+}
+
 static void update_ghost_oam(void) {
-    if (game_can_play_approx(game_state, game_cursor->col, game_cursor->row)) {
-        const uint8_t black = (game_color_to_play(game_state) == COLOR_BLACK);
-        OBP1_REG = black ? DMG_PALETTE(0, 1, 2, 3) : DMG_PALETTE(0, 0, 1, 2);
+    if (ghost_can_play()) {
+        const uint8_t color = game_color_to_play(game_state);
+        OBP1_REG = (color == COLOR_BLACK) ? DMG_PALETTE(0, 1, 2, 3)
+                                          : DMG_PALETTE(0, 0, 1, 2);
         HARDWARE_OAM[GHOST_SPR].x = game_cursor->target_x;
-        HARDWARE_OAM[GHOST_SPR].tile =
-            black ? TILE_SPR_STONE_B : TILE_SPR_STONE_W;
+        HARDWARE_OAM[GHOST_SPR].tile = TILE_SPR_STONE_B + color;
         HARDWARE_OAM[GHOST_SPR].y = game_cursor->target_y + 1u;
     } else {
         HARDWARE_OAM[GHOST_SPR].y = 0;

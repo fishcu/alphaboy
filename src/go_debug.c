@@ -28,7 +28,7 @@ void game_debug_log_undo(const game_t *g) {
 void game_debug_print(const game_t *g) {
     const uint8_t w = g->width;
     const uint8_t h = g->height;
-    uint16_t pos = BOARD_COORD(0, 0);
+    uint16_t pos = board_coord(0, 0);
     char row_str[BOARD_MAX_SIZE * 2];
 
     EMU_printf("Board %hux%hu\n", (uint8_t)w, (uint8_t)h);

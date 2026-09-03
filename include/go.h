@@ -99,9 +99,13 @@ typedef uint16_t move_t;
 
 /* Convert board coordinates (col, row) in [0, size) to a packed
  * padded coordinate.  The margin offset is applied automatically. */
-#define BOARD_COORD(col, row)                                                  \
-    ((uint16_t)((((row) + BOARD_MARGIN) << COORD_SHIFT) |                      \
-                ((col) + BOARD_MARGIN)))
+inline uint16_t board_coord(uint8_t col, uint8_t row) {
+    const uint8_t padded_row = row + BOARD_MARGIN;
+    const uint8_t low =
+        (uint8_t)(padded_row << COORD_SHIFT) | (col + BOARD_MARGIN);
+    const uint8_t high = padded_row >> (8u - COORD_SHIFT);
+    return ((uint16_t)high << 8) | low;
+}
 
 typedef struct game {
     uint8_t width;
@@ -146,9 +150,5 @@ undo_result_t game_undo(game_t *g);
 /* Return the color to play next (COLOR_BLACK or COLOR_WHITE).
  * Derives from the last history entry; handles handicap correctly. */
 color_t game_color_to_play(const game_t *g);
-
-/* Cheap legality approximation: 1 if (col, row) is empty and not ko.
- * Does not check suicide  --  intended for ghost stone display gating. */
-uint8_t game_can_play_approx(const game_t *g, uint8_t col, uint8_t row);
 
 #endif /* GO_H */

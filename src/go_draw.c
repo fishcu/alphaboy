@@ -43,7 +43,7 @@ void board_redraw(const game_t *g) {
 
     /* ---- Board intersections ---- */
 
-    uint16_t pos = BOARD_COORD(0, 0);
+    uint16_t pos = board_coord(0, 0);
     for (uint8_t row = 0; row < h; row++) {
         uint16_t p = pos;
         for (uint8_t col = 0; col < w; col++) {

@@ -106,7 +106,7 @@ static void replay_validate_empty(const game_t *g) {
     if (g->move_count != 0 || g->history_base != 0 || g->ko != COORD_PASS)
         replay_fail();
 
-    uint16_t row_coord = BOARD_COORD(0, 0);
+    uint16_t row_coord = board_coord(0, 0);
     for (uint8_t row = 0; row < g->height; row++) {
         for (uint8_t col = 0; col < g->width; col++)
             if (g->board[row_coord + col] != COLOR_EMPTY)
@@ -144,7 +144,7 @@ uint8_t go_replay_step(game_t *g) {
     const uint8_t row = replay_moves[replay_index * 2 + 1];
     const uint8_t color = game_color_to_play(g);
 
-    if (game_play_move(g, BOARD_COORD(col, row), color) != MOVE_LEGAL)
+    if (game_play_move(g, board_coord(col, row), color) != MOVE_LEGAL)
         replay_fail();
 
     if (++replay_index == REPLAY_MOVE_COUNT)

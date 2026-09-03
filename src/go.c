@@ -170,7 +170,7 @@ void game_reset(game_t *g, uint8_t width, uint8_t height, int8_t komi2) {
 
     memset(g->board, COLOR_OFF_BOARD, BOARD_CELLS);
 
-    uint16_t pos = BOARD_COORD(0, 0);
+    uint16_t pos = board_coord(0, 0);
     for (uint8_t row = 0; row < height; row++) {
         for (uint8_t col = 0; col < width; col++) {
             g->board[pos] = COLOR_EMPTY;
@@ -481,13 +481,4 @@ color_t game_color_to_play(const game_t *g) {
         return COLOR_BLACK;
     return COLOR_OPPOSITE(
         MOVE_COLOR(g->history[(g->move_count - 1) % HISTORY_MAX]));
-}
-
-uint8_t game_can_play_approx(const game_t *g, uint8_t col, uint8_t row) {
-    const uint16_t coord = BOARD_COORD(col, row);
-    if (coord == g->ko)
-        return 0;
-    if (g->board[coord] != COLOR_EMPTY)
-        return 0;
-    return 1;
 }
