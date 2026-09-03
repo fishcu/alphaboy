@@ -344,30 +344,23 @@ ko_done:;
 }
 
 typedef struct captured_restore {
-    uint8_t *board;
-    uint16_t last_coord;
-    uint8_t last_tile;
+    uint16_t held_coord;
     uint8_t opp_color;
     uint8_t opp_tile;
     uint8_t stream_pending;
 } captured_restore_t;
 
 /* Restore one group recorded by a capture-direction flag. */
-static void restore_captured_group(captured_restore_t *restore, uint16_t seed) {
+static void restore_captured_group(captured_restore_t *restore, uint16_t seed,
+                                   uint8_t *board) {
     uint16_t head = 0;
     uint16_t tail = 0;
-    uint8_t *const board = restore->board;
 
     flood_deque[tail++] = seed;
     board[seed] = restore->opp_color;
 
     while (head < tail) {
         const uint16_t pos = flood_deque[head++];
-        board_animation_stream_push(pos,
-                                    (pos == restore->last_coord)
-                                        ? restore->last_tile
-                                        : restore->opp_tile,
-                                    &restore->stream_pending);
         uint16_t adj;
         FOR_EACH_NEIGHBOR(pos, adj, {
             if (board[adj] == COLOR_EMPTY) {
@@ -375,6 +368,15 @@ static void restore_captured_group(captured_restore_t *restore, uint16_t seed) {
                 flood_deque[tail++] = adj;
             }
         });
+    }
+
+    while (tail != 0) {
+        const uint16_t pos = flood_deque[--tail];
+        if (restore->held_coord != COORD_PASS) {
+            board_animation_stream_push(restore->held_coord, restore->opp_tile,
+                                        &restore->stream_pending);
+        }
+        restore->held_coord = pos;
     }
 }
 
@@ -388,9 +390,10 @@ undo_result_t game_undo(game_t *g) {
     assert(board_animation_tail == board_animation_committed &&
            "previous board animation was not fully published");
 
-    const uint16_t old_ko = g->ko;
     uint16_t last_coord = COORD_PASS;
     uint8_t last_tile = 0;
+    uint16_t final_capture = COORD_PASS;
+    uint8_t final_capture_tile = 0;
 
     g->move_count--;
     const move_t move = g->history[g->move_count % HISTORY_MAX];
@@ -408,11 +411,14 @@ undo_result_t game_undo(game_t *g) {
             uint16_t nb;
             uint8_t dir_bit;
             FOR_EACH_NEIGHBOR_DIR(prev_coord, nb, dir_bit, {
-                if (prev & ((uint16_t)dir_bit << MOVE_CAP_SHIFT))
+                if (prev & ((uint16_t)dir_bit << MOVE_CAP_SHIFT)) {
                     g->ko = nb;
+                    goto ko_restore_done;
+                }
             });
         }
     }
+ko_restore_done:
 
     if (g->move_count > g->history_base) {
         const move_t last = g->history[(g->move_count - 1) % HISTORY_MAX];
@@ -423,15 +429,46 @@ undo_result_t game_undo(game_t *g) {
         }
     }
 
+    if (coord != COORD_PASS) {
+        if (move & (0x0Fu << MOVE_CAP_SHIFT)) {
+            const color_t color = MOVE_COLOR(move);
+            const color_t opp_color = COLOR_OPPOSITE(color);
+            const uint8_t opp_tile =
+                (color == COLOR_BLACK) ? TILE_STONE_W : TILE_STONE_B;
+            captured_restore_t restore = {COORD_PASS, opp_color, opp_tile, 0};
+
+            /* Restore captured groups by flood-filling through empties.
+             * Each captured group's empty region is fully enclosed by the
+             * capturing player's stones and the board edge, so a BFS from
+             * the capture-direction neighbor recovers exactly the group. */
+            uint16_t nb;
+            uint8_t dir_bit;
+            FOR_EACH_NEIGHBOR_DIR(coord, nb, dir_bit, {
+                if (move & ((uint16_t)dir_bit << MOVE_CAP_SHIFT))
+                    restore_captured_group(&restore, nb, g->board);
+            });
+
+            /* Keep the played point occupied until reconstruction ends. */
+            g->board[coord] = COLOR_EMPTY;
+            board_animation_stream_flush(&restore.stream_pending);
+            board_animation_wait_for(4);
+            final_capture = restore.held_coord;
+            final_capture_tile = restore.opp_tile;
+        } else {
+            g->board[coord] = COLOR_EMPTY;
+        }
+    }
+
     /*
-     * Publish the fixed-size state transition first: old ko removal,
-     * played-stone removal, restored ko, and restored last-move marker.
+     * The final restored stone and fixed state transition share one frame:
+     * restore the stone, remove the undone move, restore ko, then restore
+     * the previous last-move marker.  Earlier captures remain one per frame.
      */
     {
         const uint8_t animation_start = board_animation_tail;
 
-        if (old_ko != COORD_PASS)
-            board_animation_push(old_ko, surface_tile(old_ko));
+        if (final_capture != COORD_PASS)
+            board_animation_push(final_capture, final_capture_tile);
         if (coord != COORD_PASS)
             board_animation_push(coord, surface_tile(coord));
         if (g->ko != COORD_PASS)
@@ -442,34 +479,6 @@ undo_result_t game_undo(game_t *g) {
         if (board_animation_tail != animation_start) {
             board_animation_end_frame();
             board_animation_commit();
-        }
-    }
-
-    if (coord != COORD_PASS) {
-        if (move & (0x0Fu << MOVE_CAP_SHIFT)) {
-            const color_t color = MOVE_COLOR(move);
-            const color_t opp_color = COLOR_OPPOSITE(color);
-            const uint8_t opp_tile =
-                (color == COLOR_BLACK) ? TILE_STONE_W : TILE_STONE_B;
-            captured_restore_t restore = {g->board,  last_coord, last_tile,
-                                          opp_color, opp_tile,   0};
-
-            /* Restore captured groups by flood-filling through empties.
-             * Each captured group's empty region is fully enclosed by the
-             * capturing player's stones and the board edge, so a BFS from
-             * the capture-direction neighbor recovers exactly the group. */
-            uint16_t nb;
-            uint8_t dir_bit;
-            FOR_EACH_NEIGHBOR_DIR(coord, nb, dir_bit, {
-                if (move & ((uint16_t)dir_bit << MOVE_CAP_SHIFT))
-                    restore_captured_group(&restore, nb);
-            });
-
-            /* Keep the played point occupied until reconstruction ends. */
-            g->board[coord] = COLOR_EMPTY;
-            board_animation_stream_flush(&restore.stream_pending);
-        } else {
-            g->board[coord] = COLOR_EMPTY;
         }
     }
 
