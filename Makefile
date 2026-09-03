@@ -194,18 +194,20 @@ endif
 # FLAME_START = first frame to record
 # FLAME_FRAMES = number of frames to record
 
-GB_FLAMEGRAPH_PACKAGE = https://github.com/chrismaltby/gb-flamegraph.git
-GB_FLAMEGRAPH = npx --yes --package=$(GB_FLAMEGRAPH_PACKAGE) \
-	node --stack-size=32768 $(PROFILEDIR)/run_flamegraph.js
+GB_FLAMEGRAPH_DIR ?= ../gb-flamegraph
+GB_FLAMEGRAPH = node --stack-size=32768 \
+	$(GB_FLAMEGRAPH_DIR)/src/gb-flamegraph.js
 FLAMEGRAPH_DIR = build/flamegraph
 PROFILE_ROM    = build/profile/$(PROJECTNAME).gb
+FLAME_INPUT   ?= $(PROFILEDIR)/cursor_input.json
 FLAME_START   ?= 0
 FLAME_FRAMES  ?= 845
 
 flamegraph:
 	$(MAKE) BUILD=profile all
 	$(GB_FLAMEGRAPH) -r $(PROFILE_ROM) \
-		-s $(FLAME_START) -f $(FLAME_FRAMES) -c all -e $(FLAMEGRAPH_DIR)
+		-i $(FLAME_INPUT) -s $(FLAME_START) -f $(FLAME_FRAMES) \
+		-c all -e $(FLAMEGRAPH_DIR)
 	@echo Flamegraph written to $(FLAMEGRAPH_DIR)/
 	@echo Open $(FLAMEGRAPH_DIR)/index.html in a browser.
 
