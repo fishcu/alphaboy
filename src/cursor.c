@@ -9,6 +9,7 @@
 #define FIXED_FRACTION(value) (((uint8_t *)&(value))[0])
 #define FIXED_PIXEL(value) (((uint8_t *)&(value))[1])
 #define HARDWARE_OAM ((volatile OAM_item_t *)0xFE00u)
+#define DIRECTION_BUTTON_MASK (J_LEFT | J_RIGHT | J_UP | J_DOWN)
 
 _Static_assert(CURSOR_SPR_UL == 0 && CURSOR_SPR_UR == 1 && CURSOR_SPR_LL == 2 &&
                    CURSOR_SPR_LR == 3 && GHOST_SPR == 4,
@@ -211,7 +212,7 @@ static void draw_cursor(uint8_t px, uint16_t py_spread) __naked {
 // clang-format on
 
 inline uint8_t ghost_can_play(void) {
-    const uint16_t coord = board_coord(game_cursor->col, game_cursor->row);
+    const uint16_t coord = game_cursor->coord;
 
     if (game_state->board[coord] != COLOR_EMPTY)
         return 0;
@@ -237,10 +238,9 @@ void cursor_init(uint8_t col, uint8_t row) {
 
     c->col = col;
     c->row = row;
-    c->board_w = g->width;
-    c->board_h = g->height;
-    c->target_x = target_x(col, c->board_w);
-    c->target_y = target_y(row, c->board_h);
+    c->coord = board_coord(col, row);
+    c->target_x = target_x(col, g->width);
+    c->target_y = target_y(row, g->height);
     FIXED_FRACTION(c->x) = 0;
     FIXED_PIXEL(c->x) = c->target_x;
     FIXED_FRACTION(c->y) = 0;
@@ -266,12 +266,15 @@ void cursor_init(uint8_t col, uint8_t row) {
 void cursor_vbl_handle_input(void) {
     const uint8_t trigger = game_input->pressed | game_input->repeated;
 
+    if ((trigger & DIRECTION_BUTTON_MASK) == 0)
+        return;
+
     if ((trigger & J_LEFT) && game_cursor->col > 0) {
         game_cursor->col--;
         game_cursor->target_x -= CELL_W;
     }
     if ((trigger & J_RIGHT) &&
-        game_cursor->col < (uint8_t)(game_cursor->board_w - 1u)) {
+        game_cursor->col < (uint8_t)(game_state->width - 1u)) {
         game_cursor->col++;
         game_cursor->target_x += CELL_W;
     }
@@ -280,10 +283,12 @@ void cursor_vbl_handle_input(void) {
         game_cursor->target_y -= CELL_H;
     }
     if ((trigger & J_DOWN) &&
-        game_cursor->row < (uint8_t)(game_cursor->board_h - 1u)) {
+        game_cursor->row < (uint8_t)(game_state->height - 1u)) {
         game_cursor->row++;
         game_cursor->target_y += CELL_H;
     }
+
+    game_cursor->coord = board_coord(game_cursor->col, game_cursor->row);
 }
 
 void cursor_vbl_update_oam(void) {

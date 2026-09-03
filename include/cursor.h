@@ -8,12 +8,11 @@
 typedef struct cursor {
     uint8_t col;      /* target board column [0, board.width)  */
     uint8_t row;      /* target board row    [0, board.height) */
-    uint8_t board_w;  /* cached immutable board width          */
-    uint8_t board_h;  /* cached immutable board height         */
-    uint8_t target_x; /* target OAM X coordinate    */
-    uint8_t target_y; /* target OAM Y coordinate    */
-    uint16_t x;       /* current OAM X, 8.8 fixed   */
-    uint16_t y;       /* current OAM Y, 8.8 fixed   */
+    uint16_t coord;   /* packed target board coordinate        */
+    uint8_t target_x; /* target OAM X coordinate               */
+    uint8_t target_y; /* target OAM Y coordinate               */
+    uint16_t x;       /* current OAM X, 8.8 fixed              */
+    uint16_t y;       /* current OAM Y, 8.8 fixed              */
 } cursor_t;
 
 /* Initialize cursor at (col, row), snap position, set up OAM sprites. */

@@ -136,7 +136,7 @@ static void gameplay_vbl_isr(void) NONBANKED {
     {
         const uint8_t actions = game_input->pressed & ACTION_BUTTON_MASK;
         if (actions != 0 && !game_action_busy && !game_action_pending) {
-            game_action_coord = board_coord(game_cursor->col, game_cursor->row);
+            game_action_coord = game_cursor->coord;
             game_action_pending = actions;
         }
     }
