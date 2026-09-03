@@ -10,7 +10,9 @@
 /*
  * The upper tile byte bit ends the current visual animation step.  VBlank
  * drains all preceding commands in the same frame, then yields after this
- * command.  Tile indices currently occupy only the lower seven bits.
+ * command.  Every published sequence must end with this bit; the consumer
+ * relies on that invariant to avoid checking the committed frontier after
+ * each write.  Tile indices currently occupy only the lower seven bits.
  */
 #define BOARD_ANIMATION_FRAME_END 0x80u
 #define BOARD_ANIMATION_TILE_MASK 0x7Fu
@@ -73,6 +75,13 @@ inline void board_animation_end_frame(void) {
 
 /* Make all staged commands visible to VBlank. */
 inline void board_animation_commit(void) {
+    const uint8_t last =
+        (board_animation_tail - 1u) & (BOARD_ANIMATION_QUEUE_MAX - 1u);
+    assert(board_animation_tail != board_animation_committed &&
+           "cannot commit an empty animation sequence");
+    assert((board_animation_queue[last].tile & BOARD_ANIMATION_FRAME_END) !=
+               0 &&
+           "committed animation sequence must end at a frame boundary");
     board_animation_committed = board_animation_tail;
 }
 

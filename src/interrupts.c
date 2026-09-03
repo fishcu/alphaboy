@@ -11,17 +11,6 @@
 #include "memory.h"
 
 #define ACTION_BUTTON_MASK (J_A | J_B)
-#define BOARD_ANIMATION_VBL_WRITE()                                            \
-    do {                                                                       \
-        if (h == committed)                                                    \
-            goto board_animation_done;                                         \
-        command = board_animation_queue[h].tile;                               \
-        *(volatile uint8_t *)(0x9800u + board_animation_queue[h].pc) =         \
-            command & BOARD_ANIMATION_TILE_MASK;                               \
-        h = board_animation_next(h);                                           \
-        if (command & BOARD_ANIMATION_FRAME_END)                               \
-            goto board_animation_done;                                         \
-    } while (0)
 
 _Static_assert(BOARD_ANIMATION_MAX_WRITES_PER_FRAME == 4u,
                "unrolled VBlank animation budget must stay at four writes");
@@ -92,34 +81,57 @@ void timer_isr(void) __naked {
 ISR_VECTOR(VECTOR_TIMER, timer_isr)
 // clang-format on
 
+#define BOARD_ANIMATION_VBL_WRITE()                                            \
+    do {                                                                       \
+        const uint8_t offset = (uint8_t)(h << 2);                              \
+        volatile board_animation_entry_t *const entry =                        \
+            (volatile board_animation_entry_t *)(BOARD_ANIMATION_QUEUE_BASE |  \
+                                                 offset);                      \
+        command = entry->tile;                                                 \
+        *(volatile uint8_t *)(0x9800u + entry->pc) =                           \
+            command & BOARD_ANIMATION_TILE_MASK;                               \
+        h = board_animation_next(h);                                           \
+    } while (0)
+
+static void board_animation_vbl_drain(void) {
+    uint8_t h = board_animation_head;
+    uint8_t command;
+
+    if (h == board_animation_committed)
+        return;
+
+    BOARD_ANIMATION_VBL_WRITE();
+    if (command & BOARD_ANIMATION_FRAME_END)
+        goto board_animation_done;
+    BOARD_ANIMATION_VBL_WRITE();
+    if (command & BOARD_ANIMATION_FRAME_END)
+        goto board_animation_done;
+    BOARD_ANIMATION_VBL_WRITE();
+    if (command & BOARD_ANIMATION_FRAME_END)
+        goto board_animation_done;
+    BOARD_ANIMATION_VBL_WRITE();
+
+board_animation_done:
+    board_animation_head = h;
+}
+
+#undef BOARD_ANIMATION_VBL_WRITE
+
 /* ---- VBlank ISR ----
  * 1. Resets SCY to base_scy for the next frame's vertical compression.
  * 2. Re-syncs the hardware timer (TIMA, DIV) so the first
  *    timer overflow after VBlank lands correctly.
- * 3. Applies one committed board-animation step.
- * 4. Samples input and advances the logical cursor target.
- * 5. Derives the ghost from stable logical state and updates all five
- *    gameplay sprites directly in hardware OAM. */
+ * 3. Samples input and advances the logical cursor target.
+ * 4. Derives the ghost from stable logical state and updates all five
+ *    gameplay sprites directly in hardware OAM.
+ * 5. Applies one committed board-animation step. */
 static void gameplay_vbl_isr(void) NONBANKED {
     SCY_REG = base_scy;
     TIMA_REG = timer_initial;
     DIV_REG = 0;
     IF_REG &= ~TIM_IFLAG;
 
-    {
-        uint8_t h = board_animation_head;
-        const uint8_t committed = board_animation_committed;
-        uint8_t command;
-
-        BOARD_ANIMATION_VBL_WRITE();
-        BOARD_ANIMATION_VBL_WRITE();
-        BOARD_ANIMATION_VBL_WRITE();
-        BOARD_ANIMATION_VBL_WRITE();
-    board_animation_done:
-        board_animation_head = h;
-    }
-
-    input_poll(game_input);
+    input_poll();
 
     {
         const uint8_t actions = game_input->pressed & ACTION_BUTTON_MASK;
@@ -131,9 +143,8 @@ static void gameplay_vbl_isr(void) NONBANKED {
 
     cursor_vbl_handle_input();
     cursor_vbl_update_oam();
+    board_animation_vbl_drain();
 }
-
-#undef BOARD_ANIMATION_VBL_WRITE
 
 void gameplay_interrupts_init(uint8_t board_w, uint8_t board_h) {
     const uint8_t offset_x = (SCREEN_W * 8 - board_w * CELL_W) / 2;

@@ -14,6 +14,7 @@ endif
 GBDK_HOME  = gbdk_release/
 LCC        = $(GBDK_HOME)bin/lcc
 PNG2ASSET  = $(GBDK_HOME)bin/png2asset
+ROMUSAGE   = $(GBDK_HOME)bin/romusage
 
 # ---- Project ----
 PROJECTNAME = alphaboy
@@ -41,6 +42,7 @@ OBJDIR   = obj/$(BUILD)
 BUILDDIR = build/$(BUILD)
 
 BINS       = $(BUILDDIR)/$(PROJECTNAME).gb
+MAPFILE    = $(BUILDDIR)/$(PROJECTNAME).map
 
 CSOURCES   = $(foreach dir,$(SRCDIR),$(notdir $(wildcard $(dir)/*.c)))
 RESSOURCES = $(foreach dir,$(RESDIR),$(notdir $(wildcard $(dir)/*.c)))
@@ -63,8 +65,16 @@ endif
 # ---- Flags ----
 # MBC5 + RAM + Battery (cart type 0x1B), 1 RAM bank (8 KB)
 # Reserve four page-aligned fixed-bank pages for cursor easing tables.
+# Keep GBDK shadow OAM at 0xC000, reserve an aligned WRAM queue at 0xC100,
+# then start automatic C data immediately after the queue.
+BOARD_ANIMATION_QUEUE_BASE = 0xC100
+WRAM_DATA_BASE              = 0xC180
 LCCFLAGS = -Wm-yt0x1B -Wm-ya1 -Wl-b_CODE=0x0600 \
-           -Wl-b_CURSOR_EASING=0x0200 -I$(INCDIR) -I$(RESDIR)
+           -Wl-b_CURSOR_EASING=0x0200 \
+           -Wl-b_BOARD_ANIMATION=$(BOARD_ANIMATION_QUEUE_BASE) \
+           -Wl-b_DATA=$(WRAM_DATA_BASE) -Wl-m \
+           -DBOARD_ANIMATION_QUEUE_BASE=$(BOARD_ANIMATION_QUEUE_BASE) \
+           -I$(INCDIR) -I$(RESDIR)
 
 ifeq ($(BUILD),release)
 	LCCFLAGS += -DNDEBUG -Wf--opt-code-speed -Wf--max-allocs-per-node50000
@@ -90,11 +100,14 @@ all: dirs $(BINS)
 # Link object files into the final ROM
 $(BINS): $(OBJS)
 	$(LCC) $(LCCFLAGS) -o $@ $^
+	$(ROMUSAGE) $(MAPFILE) -q -R -E \
+		-e:SHADOW_OAM:C000:A0 -e:STACK:DF00:100
 
 # Compile src/*.c
 $(OBJDIR)/%.o: $(SRCDIR)/%.c
 	$(LCC) $(LCCFLAGS) -c -o $@ $<
 
+$(OBJDIR)/board_animation_queue.o: LCCFLAGS += -Wf--dataseg -WfBOARD_ANIMATION
 $(OBJDIR)/go_draw.o: $(BOARD_SURFACES)
 $(OBJDIR)/cursor.o: $(CURSOR_EASING)
 $(CURSOR_EASING_OBJ): $(CURSOR_EASING_ASM)
