@@ -18,14 +18,14 @@ void main(void) {
     memset(game_input, 0, sizeof(input_t));
 
     game_action_pending = 0;
-    game_action_busy = 1;
+    game_action_busy = 0;
     game_action_coord = COORD_PASS;
 
     board_animation_head = 0;
     board_animation_tail = 0;
     board_animation_committed = 0;
 
-    cursor_init(game_cursor, g->width / 2, g->height / 2, g);
+    cursor_init(g->width / 2, g->height / 2);
     display_init();
     board_redraw(g);
     gameplay_interrupts_init(g->width, g->height);
@@ -33,6 +33,9 @@ void main(void) {
 
     while (1) {
         vsync();
+        /* Match main-loop ownership while a replay step may mutate state. */
+        game_action_busy = 1;
         go_replay_step(g);
+        game_action_busy = 0;
     }
 }

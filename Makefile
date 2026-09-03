@@ -26,6 +26,9 @@ TOOLSDIR   = tools
 
 BOARD_SURFACES          = $(RESDIR)/board_surfaces.h
 BOARD_SURFACE_GENERATOR = $(TOOLSDIR)/generate_board_surfaces.js
+CURSOR_EASING           = $(RESDIR)/cursor_easing.h
+CURSOR_EASING_ASM       = $(RESDIR)/cursor_easing.s
+CURSOR_EASING_GENERATOR = $(TOOLSDIR)/generate_cursor_easing.js
 
 # ---- Build configuration ----
 # BUILD = debug          (default) debug symbols, verbose, no optimisation
@@ -51,13 +54,17 @@ endif
 OBJS  = $(CSOURCES:%.c=$(OBJDIR)/%.o)
 OBJS += $(RESSOURCES:%.c=$(OBJDIR)/%.o)
 OBJS += $(ASMSOURCES:%.s=$(OBJDIR)/%.o)
+CURSOR_EASING_OBJ = $(OBJDIR)/cursor_easing.o
+OBJS += $(CURSOR_EASING_OBJ)
 ifeq ($(BUILD),profile)
     OBJS += $(PROFILESOURCES:%.c=$(OBJDIR)/%.o)
 endif
 
 # ---- Flags ----
 # MBC5 + RAM + Battery (cart type 0x1B), 1 RAM bank (8 KB)
-LCCFLAGS = -Wm-yt0x1B -Wm-ya1 -I$(INCDIR) -I$(RESDIR)
+# Reserve four page-aligned fixed-bank pages for cursor easing tables.
+LCCFLAGS = -Wm-yt0x1B -Wm-ya1 -Wl-b_CODE=0x0600 \
+           -Wl-b_CURSOR_EASING=0x0200 -I$(INCDIR) -I$(RESDIR)
 
 ifeq ($(BUILD),release)
 	LCCFLAGS += -DNDEBUG -Wf--opt-code-speed -Wf--max-allocs-per-node50000
@@ -89,6 +96,9 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c
 	$(LCC) $(LCCFLAGS) -c -o $@ $<
 
 $(OBJDIR)/go_draw.o: $(BOARD_SURFACES)
+$(OBJDIR)/cursor.o: $(CURSOR_EASING)
+$(CURSOR_EASING_OBJ): $(CURSOR_EASING_ASM)
+	$(LCC) $(LCCFLAGS) -c -o $@ $<
 
 # Compile res/*.c
 $(OBJDIR)/%.o: $(RESDIR)/%.c
@@ -104,7 +114,7 @@ $(OBJDIR)/%.o: $(PROFILEDIR)/%.c
 
 # ---- Asset conversion ----
 
-assets: $(RESDIR)/tiles.c $(BOARD_SURFACES)
+assets: $(RESDIR)/tiles.c $(BOARD_SURFACES) $(CURSOR_EASING) $(CURSOR_EASING_ASM)
 
 $(RESDIR)/tiles.c: assets/tiles.png
 	$(PNG2ASSET) $< -o $@ -map -keep_palette_order -noflip
@@ -112,7 +122,14 @@ $(RESDIR)/tiles.c: assets/tiles.png
 $(BOARD_SURFACES): $(BOARD_SURFACE_GENERATOR)
 	node $(BOARD_SURFACE_GENERATOR) $(BOARD_SURFACES)
 
+$(CURSOR_EASING): $(CURSOR_EASING_GENERATOR)
+	node $(CURSOR_EASING_GENERATOR) $(CURSOR_EASING)
+
+$(CURSOR_EASING_ASM): $(CURSOR_EASING_GENERATOR)
+	node $(CURSOR_EASING_GENERATOR) $(CURSOR_EASING_ASM)
+
 board-surfaces: $(BOARD_SURFACES)
+cursor-easing: $(CURSOR_EASING) $(CURSOR_EASING_ASM)
 
 # ---- Utility targets ----
 
@@ -193,4 +210,4 @@ else
 	-$(RMDIR) build
 endif
 
-.PHONY: all dirs assets board-surfaces run format flamegraph clean
+.PHONY: all dirs assets board-surfaces cursor-easing run format flamegraph clean

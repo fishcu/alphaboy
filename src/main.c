@@ -28,7 +28,7 @@ void main(void) {
     board_animation_tail = 0;
     board_animation_committed = 0;
 
-    cursor_init(game_cursor, g->width / 2, g->height / 2, g);
+    cursor_init(g->width / 2, g->height / 2);
 
     /* ---- Display init ---- */
 
@@ -72,8 +72,6 @@ void main(void) {
             if (game_undo(g) == UNDO_OK)
                 DEBUG_LOG_UNDO(g);
         }
-
-        cursor_refresh_ghost(game_cursor, g);
 
         if (actions != 0) {
             /*

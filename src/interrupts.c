@@ -54,7 +54,7 @@ _Static_assert(BOARD_ANIMATION_MAX_WRITES_PER_FRAME == 4u,
  *
  * The vcomp_demo reference resets the timer after GBDK's automatic OAM
  * transfer.  This callback disables that transfer and resets before doing
- * its manual transfer, so it starts 165 M-cycles earlier: the enabled OAM
+ * its direct OAM updates, so it starts 165 M-cycles earlier: the enabled OAM
  * path takes 174 M-cycles while the disabled path takes 9.  Delaying by
  * 41 timer ticks restores all but one M-cycle of the reference phase. */
 
@@ -98,7 +98,8 @@ ISR_VECTOR(VECTOR_TIMER, timer_isr)
  *    timer overflow after VBlank lands correctly.
  * 3. Applies one committed board-animation step.
  * 4. Samples input and advances the logical cursor target.
- * 5. Updates the five gameplay sprites directly in hardware OAM. */
+ * 5. Derives the ghost from stable logical state and updates all five
+ *    gameplay sprites directly in hardware OAM. */
 static void gameplay_vbl_isr(void) NONBANKED {
     SCY_REG = base_scy;
     TIMA_REG = timer_initial;

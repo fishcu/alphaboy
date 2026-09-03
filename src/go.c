@@ -225,7 +225,8 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
 
     /*
      * The speculative visual prefix is bounded: previous last marker,
-     * previous ko marker, new stone, and a possible new ko marker.
+     * previous ko marker, new stone, and either a new ko marker or the
+     * first ordinary capture.
      */
     board_animation_wait_for(4);
     assert(board_animation_tail == board_animation_committed &&
@@ -314,16 +315,22 @@ ko_done:;
 
     if (g->ko != COORD_PASS)
         board_animation_push(g->ko, ko_tile(g->ko));
+
+    if (capture_count != 0) {
+        const uint16_t cap = flood_deque[0];
+        g->board[cap] = COLOR_EMPTY;
+        if (g->ko == COORD_PASS)
+            board_animation_push(cap, surface_tile(cap));
+    }
+
     board_animation_end_frame();
     board_animation_commit();
 
     uint8_t stream_pending = 0;
-    for (uint16_t i = 0; i < capture_count; i++) {
+    for (uint16_t i = 1; i < capture_count; i++) {
         const uint16_t cap = flood_deque[i];
         g->board[cap] = COLOR_EMPTY;
-        if (cap != g->ko)
-            board_animation_stream_push(cap, surface_tile(cap),
-                                        &stream_pending);
+        board_animation_stream_push(cap, surface_tile(cap), &stream_pending);
     }
     board_animation_stream_flush(&stream_pending);
 
