@@ -25,8 +25,8 @@ void main(void) {
     board_animation_tail = 0;
     board_animation_committed = 0;
 
-    cursor_init(g->width / 2, g->height / 2);
     display_init();
+    cursor_init(g->width / 2, g->height / 2);
     board_redraw(g);
     gameplay_interrupts_init(g->width, g->height);
     display_start();

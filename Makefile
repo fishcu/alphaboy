@@ -30,6 +30,9 @@ BOARD_SURFACE_GENERATOR = $(TOOLSDIR)/generate_board_surfaces.js
 CURSOR_EASING           = $(RESDIR)/cursor_easing.h
 CURSOR_EASING_ASM       = $(RESDIR)/cursor_easing.s
 CURSOR_EASING_GENERATOR = $(TOOLSDIR)/generate_cursor_easing.js
+GHOST_DITHER            = $(RESDIR)/ghost_dither.h
+GHOST_DITHER_ASM        = $(RESDIR)/ghost_dither.s
+GHOST_DITHER_GENERATOR  = $(TOOLSDIR)/generate_ghost_dither.js
 
 # ---- Build configuration ----
 # BUILD = debug          (default) debug symbols, verbose, no optimisation
@@ -58,19 +61,24 @@ OBJS += $(RESSOURCES:%.c=$(OBJDIR)/%.o)
 OBJS += $(ASMSOURCES:%.s=$(OBJDIR)/%.o)
 CURSOR_EASING_OBJ = $(OBJDIR)/cursor_easing.o
 OBJS += $(CURSOR_EASING_OBJ)
+GHOST_DITHER_OBJ = $(OBJDIR)/ghost_dither.o
+OBJS += $(GHOST_DITHER_OBJ)
 ifeq ($(BUILD),profile)
     OBJS += $(PROFILESOURCES:%.c=$(OBJDIR)/%.o)
 endif
 
 # ---- Flags ----
 # MBC5 + RAM + Battery (cart type 0x1B), 1 RAM bank (8 KB)
-# Reserve four page-aligned fixed-bank pages for cursor easing tables.
+# Reserve page-aligned fixed-bank pages for cursor easing and ghost dithering.
 # Keep GBDK shadow OAM at 0xC000, reserve an aligned WRAM queue at 0xC100,
 # then start automatic C data immediately after the queue.
 BOARD_ANIMATION_QUEUE_BASE = 0xC100
 WRAM_DATA_BASE              = 0xC180
-LCCFLAGS = -Wm-yt0x1B -Wm-ya1 -Wl-b_CODE=0x0600 \
+LCCFLAGS = -Wm-yt0x1B -Wm-ya1 -Wl-b_CODE=0x0800 \
            -Wl-b_CURSOR_EASING=0x0200 \
+           -Wl-b_GHOST_DITHER_POSITION=0x0600 \
+           -Wl-b_GHOST_DITHER_BLACK=0x0680 \
+           -Wl-b_GHOST_DITHER_WHITE=0x0780 \
            -Wl-b_BOARD_ANIMATION=$(BOARD_ANIMATION_QUEUE_BASE) \
            -Wl-b_DATA=$(WRAM_DATA_BASE) -Wl-m \
            -DBOARD_ANIMATION_QUEUE_BASE=$(BOARD_ANIMATION_QUEUE_BASE) \
@@ -109,8 +117,10 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c
 
 $(OBJDIR)/board_animation_queue.o: LCCFLAGS += -Wf--dataseg -WfBOARD_ANIMATION
 $(OBJDIR)/go_draw.o: $(BOARD_SURFACES)
-$(OBJDIR)/cursor.o: $(CURSOR_EASING)
+$(OBJDIR)/cursor.o: $(CURSOR_EASING) $(GHOST_DITHER)
 $(CURSOR_EASING_OBJ): $(CURSOR_EASING_ASM)
+	$(LCC) $(LCCFLAGS) -c -o $@ $<
+$(GHOST_DITHER_OBJ): $(GHOST_DITHER_ASM)
 	$(LCC) $(LCCFLAGS) -c -o $@ $<
 
 # Compile res/*.c
@@ -127,7 +137,8 @@ $(OBJDIR)/%.o: $(PROFILEDIR)/%.c
 
 # ---- Asset conversion ----
 
-assets: $(RESDIR)/tiles.c $(BOARD_SURFACES) $(CURSOR_EASING) $(CURSOR_EASING_ASM)
+assets: $(RESDIR)/tiles.c $(BOARD_SURFACES) $(CURSOR_EASING) \
+	$(CURSOR_EASING_ASM) $(GHOST_DITHER) $(GHOST_DITHER_ASM)
 
 $(RESDIR)/tiles.c: assets/tiles.png
 	$(PNG2ASSET) $< -o $@ -map -keep_palette_order -noflip
@@ -141,8 +152,15 @@ $(CURSOR_EASING): $(CURSOR_EASING_GENERATOR)
 $(CURSOR_EASING_ASM): $(CURSOR_EASING_GENERATOR)
 	node $(CURSOR_EASING_GENERATOR) $(CURSOR_EASING_ASM)
 
+$(GHOST_DITHER): $(GHOST_DITHER_GENERATOR) $(RESDIR)/tiles.c
+	node $(GHOST_DITHER_GENERATOR) $(GHOST_DITHER) $(RESDIR)/tiles.c
+
+$(GHOST_DITHER_ASM): $(GHOST_DITHER_GENERATOR) $(RESDIR)/tiles.c
+	node $(GHOST_DITHER_GENERATOR) $(GHOST_DITHER_ASM) $(RESDIR)/tiles.c
+
 board-surfaces: $(BOARD_SURFACES)
 cursor-easing: $(CURSOR_EASING) $(CURSOR_EASING_ASM)
+ghost-dither: $(GHOST_DITHER) $(GHOST_DITHER_ASM)
 
 # ---- Utility targets ----
 
@@ -225,4 +243,4 @@ else
 	-$(RMDIR) build
 endif
 
-.PHONY: all dirs assets board-surfaces cursor-easing run format flamegraph clean
+.PHONY: all dirs assets board-surfaces cursor-easing ghost-dither run format flamegraph clean

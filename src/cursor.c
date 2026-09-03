@@ -4,7 +4,9 @@
 #include "cursor.h"
 #include "cursor_easing.h"
 #include "display.h"
+#include "ghost_dither.h"
 #include "memory.h"
+#include "tiles.h"
 
 #define FIXED_FRACTION(value) (((uint8_t *)&(value))[0])
 #define FIXED_PIXEL(value) (((uint8_t *)&(value))[1])
@@ -22,6 +24,31 @@ _Static_assert(COLOR_BLACK == 0u && COLOR_WHITE == 1u,
                "ghost tile arithmetic requires consecutive colors");
 _Static_assert(TILE_SPR_STONE_W == TILE_SPR_STONE_B + 1u,
                "ghost stone sprite tiles must be consecutive");
+_Static_assert(TILE_SPR_STONE_B == GHOST_DITHER_BLACK_TILE_INDEX &&
+                   TILE_SPR_STONE_W == GHOST_DITHER_WHITE_TILE_INDEX,
+               "ghost dither tables must match generated sprite tiles");
+_Static_assert(GHOST_DITHER_POSITION_TABLE_PAGE == 0x06u &&
+                   GHOST_DITHER_BLACK_COMMAND_TABLE_PAGE == 0x06u &&
+                   GHOST_DITHER_WHITE_COMMAND_TABLE_PAGE == 0x07u &&
+                   GHOST_DITHER_COMMAND_TABLE_OFFSET == 0x80u &&
+                   GHOST_DITHER_TILE_VRAM_PAGE == 0x83u,
+               "ghost dither assembly requires fixed LUT and VRAM pages");
+_Static_assert(GHOST_DITHER_OFFSET_STEP == 53u,
+               "ghost dither assembly requires offset step 53");
+_Static_assert(tiles_TILE_COUNT == TILE_COUNT,
+               "generated tile count must match display tile indices");
+
+typedef struct ghost_dither_state {
+    uint8_t phase;
+    uint8_t clear_offset;
+    uint8_t restore_offset;
+    uint8_t command_page;
+} ghost_dither_state_t;
+
+_Static_assert(sizeof(ghost_dither_state_t) == 4u,
+               "ghost dither state must use a four-byte stride");
+
+static ghost_dither_state_t ghost_dither_state[2];
 
 /* Compute target OAM X.
  * Board is drawn at BG tile (0,0) and centered via scroll registers.
@@ -219,6 +246,154 @@ inline uint8_t ghost_can_play(void) {
     return coord != game_state->ko;
 }
 
+static void ghost_dither_init(void) {
+    for (uint8_t color = COLOR_BLACK; color <= COLOR_WHITE; color++) {
+        ghost_dither_state_t *const state = &ghost_dither_state[color];
+
+        state->phase = 0;
+        state->clear_offset = 0;
+        state->restore_offset = 0;
+        state->command_page = (color == COLOR_BLACK)
+                                  ? GHOST_DITHER_BLACK_COMMAND_TABLE_PAGE
+                                  : GHOST_DITHER_WHITE_COMMAND_TABLE_PAGE;
+        for (uint8_t rank = 0; rank < GHOST_DITHER_TRANSPARENT_PIXELS; rank++) {
+            const uint8_t position =
+                *(const uint8_t *)(((uint16_t)GHOST_DITHER_POSITION_TABLE_PAGE
+                                    << 8) |
+                                   rank);
+            const uint8_t *const command =
+                (const uint8_t *)(((uint16_t)state->command_page << 8) |
+                                  GHOST_DITHER_COMMAND_TABLE_OFFSET |
+                                  (position << 1));
+            const uint8_t address = command[0] & 0x7Eu;
+            const uint8_t mask = ~command[1];
+            volatile uint8_t *const pixel =
+                (volatile uint8_t *)(((uint16_t)GHOST_DITHER_TILE_VRAM_PAGE
+                                      << 8) |
+                                     address);
+
+            pixel[0] &= mask;
+            pixel[1] &= mask;
+        }
+    }
+}
+
+// clang-format off
+static void ghost_dither_update(uint8_t color) __naked {
+    color;
+    __asm
+        ; ABI: A = color (0 black, 1 white).
+        ; State has a four-byte stride: phase, clear offset, restore offset,
+        ; and the command-table page.
+        add  a, a
+        add  a, a
+        ld   c, a
+        ld   b, #0
+        ld   hl, #_ghost_dither_state
+        add  hl, bc
+        ld   a, (hl)
+        ld   d, a
+        inc  a
+        and  a, #0x3f
+        ld   (hl+), a
+
+        ; Each pointer gets a new spatial offset after its own rank wraps.
+        ld   a, (hl)
+        ld   e, a
+        ld   a, d
+        add  a, #0x10
+        and  a, #0x3f
+        cp   a, #0x3f
+        jr   NZ, 02001$
+        ld   a, e
+        add  a, #0x35
+        and  a, #0x3f
+        ld   (hl), a
+    02001$:
+        inc  hl
+        ld   b, (hl)
+        ld   a, d
+        cp   a, #0x3f
+        jr   NZ, 02002$
+        ld   a, b
+        add  a, #0x35
+        and  a, #0x3f
+        ld   (hl), a
+    02002$:
+        inc  hl
+        ld   c, (hl)
+
+        ; Clear the pixel 16 ranks ahead of the restored pixel.
+        ld   a, d
+        add  a, #0x10
+        and  a, #0x3f
+        ld   l, a
+        ld   h, #0x06
+        ld   a, (hl)
+        add  a, e
+        and  a, #0x3f
+        add  a, a
+        or   a, #0x80
+        ld   l, a
+        ld   h, c
+        ld   a, (hl+)
+        and  a, #0x7e
+        ld   e, a
+        ld   c, (hl)
+        ld   a, c
+        cpl
+        ld   c, a
+
+        ld   h, #0x83
+        ld   l, e
+        ld   a, (hl)
+        and  a, c
+        ld   (hl+), a
+        ld   a, (hl)
+        and  a, c
+        ld   (hl), a
+
+        ; Restore the current pixel from the source-bit flags in its entry.
+        ld   a, d
+        ld   l, a
+        ld   h, #0x06
+        ld   a, (hl)
+        add  a, b
+        and  a, #0x3f
+        add  a, a
+        or   a, #0x80
+        ld   l, a
+        ld   h, #0x06
+        bit  4, e
+        jr   Z, 02003$
+        inc  h
+    02003$:
+        ld   a, (hl+)
+        ld   d, a
+        ld   e, (hl)
+
+        ld   h, #0x83
+        ld   a, d
+        and  a, #0x7e
+        ld   l, a
+        bit  0, d
+        jr   Z, 02004$
+        ld   a, (hl)
+        or   a, e
+        ld   (hl), a
+    02004$:
+        bit  7, d
+        jr   Z, 02005$
+        inc  l
+        ld   a, (hl)
+        or   a, e
+        ld   (hl), a
+    02005$:
+        ret
+    __endasm;
+}
+// clang-format on
+
 static void update_ghost_oam(void) {
     if (ghost_can_play()) {
         const uint8_t color = game_color_to_play(game_state);
@@ -227,6 +402,7 @@ static void update_ghost_oam(void) {
         HARDWARE_OAM[GHOST_SPR].x = game_cursor->target_x;
         HARDWARE_OAM[GHOST_SPR].tile = TILE_SPR_STONE_B + color;
         HARDWARE_OAM[GHOST_SPR].y = game_cursor->target_y + 1u;
+        ghost_dither_update(color);
     } else {
         HARDWARE_OAM[GHOST_SPR].y = 0;
     }
@@ -260,6 +436,7 @@ void cursor_init(uint8_t col, uint8_t row) {
     HARDWARE_OAM[CURSOR_SPR_LR].tile = TILE_CURSOR;
     HARDWARE_OAM[CURSOR_SPR_LR].prop = S_FLIPX | S_FLIPY;
     HARDWARE_OAM[GHOST_SPR].prop = S_PALETTE;
+    ghost_dither_init();
     update_ghost_oam();
 }
 
