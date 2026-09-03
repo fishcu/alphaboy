@@ -88,7 +88,7 @@ ISR_VECTOR(VECTOR_TIMER, timer_isr)
             (volatile board_animation_entry_t *)(BOARD_ANIMATION_QUEUE_BASE |  \
                                                  offset);                      \
         command = entry->tile;                                                 \
-        *(volatile uint8_t *)(0x9800u + entry->pc) =                           \
+        *(volatile uint8_t *)entry->destination =                              \
             command & BOARD_ANIMATION_TILE_MASK;                               \
         h = board_animation_next(h);                                           \
     } while (0)

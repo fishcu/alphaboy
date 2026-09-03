@@ -102,6 +102,10 @@ enum {
 /*  VRAM addressing                                                   */
 /* ------------------------------------------------------------------ */
 
+/* BG tile map 0, equivalent to GBDK's _SCRN0 linker symbol.
+ * Keep the numeric form so SDCC can fold address construction. */
+#define BOARD_TILEMAP_BASE 0x9800u
+
 /* Construct a BG tile-map offset from raw tile-map (x, y) positions.
  * The BG map is 32 tiles wide (shift 5), matching COORD_SHIFT in go.h
  * by design so board coordinates double as tile-map offsets. */

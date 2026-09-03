@@ -33,7 +33,7 @@ uint8_t ko_tile(uint16_t coord) {
 void board_redraw(const game_t *g) {
     const uint8_t w = g->width;
     const uint8_t h = g->height;
-    uint8_t *const tilemap = (uint8_t *)0x9800u;
+    uint8_t *const tilemap = (uint8_t *)BOARD_TILEMAP_BASE;
 
     board_surface_select(w);
     memcpy(tilemap, board_surface, BOARD_SURFACE_TILEMAP_SIZE);

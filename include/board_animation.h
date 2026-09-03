@@ -56,8 +56,8 @@ inline void board_animation_push(uint16_t pc, uint8_t tile) {
     const uint8_t next = board_animation_next(tail);
     while (next == board_animation_head) {
     }
-    board_animation_queue[tail].pc = pc;
     board_animation_queue[tail].tile = tile;
+    board_animation_queue[tail].destination = BOARD_TILEMAP_BASE + pc;
     board_animation_tail = next;
 }
 

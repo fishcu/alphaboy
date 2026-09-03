@@ -15,8 +15,8 @@
  * VRAM (0x8000-0x9FFF):
  *   0x8000-0x8FFF  Shared BG + Sprite tiles  (4 KB, 256 tiles)
  *   0x9000-0x97FF  Free                      (2 KB)
- *   0x9800-0x9BFF  BG Map                    (1 KB, hardware-fixed)
- *   0x9C00-0x9FFF  Window Map                (1 KB, hardware-fixed)
+ *   0x9800-0x9BFF  BG Map 0 (_SCRN0)         (1 KB, hardware-fixed)
+ *   0x9C00-0x9FFF  BG Map 1 (_SCRN1)         (1 KB, hardware-fixed)
  *
  * SRAM (0xA000-0xBFFF, 8 KB, MBC5 + RAM + Battery):
  *   Manually managed; allocations listed below.
@@ -52,18 +52,24 @@
 #endif
 
 typedef struct board_animation_entry {
-    uint16_t pc;
     uint8_t tile;
+    uint16_t destination;
     uint8_t padding; /* keeps index-to-address conversion in eight bits */
 } board_animation_entry_t;
 
-_Static_assert(sizeof(board_animation_entry_t) == 4u,
-               "animation entries must use a four-byte stride");
 _Static_assert((BOARD_ANIMATION_QUEUE_BASE & 0x00FFu) == 0,
                "animation queue must start on a page boundary");
+
+#if defined(__SDCC)
+_Static_assert(sizeof(board_animation_entry_t) == 4u,
+               "animation entries must use a four-byte stride");
+_Static_assert(offsetof(board_animation_entry_t, tile) == 0u &&
+                   offsetof(board_animation_entry_t, destination) == 1u,
+               "animation entry layout must support sequential reads");
 _Static_assert(sizeof(board_animation_entry_t) * BOARD_ANIMATION_QUEUE_MAX <=
                    0x80u,
                "animation queue exceeds its reserved WRAM page");
+#endif
 
 /* ------------------------------------------------------------------ */
 /*  SRAM object layout                                                */
