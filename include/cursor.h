@@ -24,7 +24,13 @@ void cursor_init(uint8_t col, uint8_t row);
  */
 void cursor_vbl_handle_input(void);
 
-/* VBlank-owned smooth tracking and direct OAM positioning. */
-void cursor_vbl_update_oam(void);
+/* Draw the edge coordinates prepared by the previous frame's tracking. */
+void cursor_vbl_draw_edges(void);
+
+/* Update the same-frame logical ghost in OAM and its tile in VRAM. */
+void cursor_vbl_update_ghost(void);
+
+/* WRAM-only easing tail; prepares edge coordinates for the next frame. */
+void cursor_vbl_track(void);
 
 #endif /* CURSOR_H */

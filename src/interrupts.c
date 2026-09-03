@@ -14,6 +14,8 @@
 
 _Static_assert(BOARD_ANIMATION_MAX_WRITES_PER_FRAME == 4u,
                "unrolled VBlank animation budget must stay at four writes");
+_Static_assert(TIM_IFLAG == (1u << 2),
+               "timer handoff assembly requires IF bit 2");
 
 /* ---- HBlank vertical compression (timer-based) ----
  *
@@ -81,6 +83,26 @@ void timer_isr(void) __naked {
 ISR_VECTOR(VECTOR_TIMER, timer_isr)
 // clang-format on
 
+/*
+ * Wait for the dummy timer request, then let it interrupt this VBlank handler.
+ * EI takes effect after NOP, so the pending timer runs before DI. Its RETI
+ * resumes at DI, restoring the outer GBDK dispatcher to IME-disabled state.
+ */
+// clang-format off
+static void gameplay_vbl_handoff_timer(void) __naked {
+    __asm
+00100$:
+    ldh     a, (0x0f)       ; IF_REG
+    bit     2, a             ; TIM_IFLAG
+    jr      Z, 00100$
+    ei
+    nop
+    di
+    ret
+    __endasm;
+}
+// clang-format on
+
 #define BOARD_ANIMATION_VBL_WRITE()                                            \
     do {                                                                       \
         const uint8_t offset = (uint8_t)(h << 2);                              \
@@ -121,16 +143,18 @@ board_animation_done:
  * 1. Resets SCY to base_scy for the next frame's vertical compression.
  * 2. Re-syncs the hardware timer (TIMA, DIV) so the first
  *    timer overflow after VBlank lands correctly.
- * 3. Samples input and advances the logical cursor target.
- * 4. Derives the ghost from stable logical state and updates all five
- *    gameplay sprites directly in hardware OAM.
- * 5. Applies one committed board-animation step. */
+ * 3. Draws cursor edges prepared by the previous frame.
+ * 4. Samples input and advances the logical cursor target.
+ * 5. Updates the same-frame ghost and applies one board-animation step.
+ * 6. Services the pending dummy timer.
+ * 7. Advances WRAM-only cursor easing for the next frame. */
 static void gameplay_vbl_isr(void) NONBANKED {
     SCY_REG = base_scy;
     TIMA_REG = timer_initial;
     DIV_REG = 0;
     IF_REG &= ~TIM_IFLAG;
 
+    cursor_vbl_draw_edges();
     input_poll();
 
     {
@@ -142,8 +166,15 @@ static void gameplay_vbl_isr(void) NONBANKED {
     }
 
     cursor_vbl_handle_input();
-    cursor_vbl_update_oam();
+    cursor_vbl_update_ghost();
     board_animation_vbl_drain();
+
+    /*
+     * VBlank-only boundary: all OAM and VRAM writes must remain above.
+     * The timer takes priority here; only WRAM cursor preparation follows.
+     */
+    gameplay_vbl_handoff_timer();
+    cursor_vbl_track();
 }
 
 void gameplay_interrupts_init(uint8_t board_w, uint8_t board_h) {

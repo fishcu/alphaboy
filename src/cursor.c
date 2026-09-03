@@ -50,6 +50,17 @@ _Static_assert(sizeof(ghost_dither_state_t) == 4u,
 
 static ghost_dither_state_t ghost_dither_state[2];
 
+typedef struct cursor_draw_state {
+    uint16_t py_spread;
+    uint8_t x;
+    uint8_t pending;
+} cursor_draw_state_t;
+
+_Static_assert(sizeof(cursor_draw_state_t) == 4u,
+               "cursor draw state must use four bytes");
+
+static cursor_draw_state_t cursor_draw_state;
+
 /* Compute target OAM X.
  * Board is drawn at BG tile (0,0) and centered via scroll registers.
  * OAM X = screen_offset + col*CELL_W + 8 (OAM hardware offset). */
@@ -421,6 +432,7 @@ void cursor_init(uint8_t col, uint8_t row) {
     FIXED_PIXEL(c->x) = c->target_x;
     FIXED_FRACTION(c->y) = 0;
     FIXED_PIXEL(c->y) = c->target_y;
+    cursor_draw_state.pending = 0;
 
     const uint8_t px = FIXED_PIXEL(c->x);
     const uint8_t py = FIXED_PIXEL(c->y);
@@ -468,7 +480,22 @@ void cursor_vbl_handle_input(void) {
     game_cursor->coord = board_coord(game_cursor->col, game_cursor->row);
 }
 
-void cursor_vbl_update_oam(void) {
+void cursor_vbl_draw_edges(void) {
+    if (cursor_draw_state.pending == 0)
+        return;
+
+    cursor_draw_state.pending = 0;
+    draw_cursor(cursor_draw_state.x, cursor_draw_state.py_spread);
+}
+
+void cursor_vbl_update_ghost(void) {
+    if (!game_action_busy)
+        update_ghost_oam();
+    else
+        HARDWARE_OAM[GHOST_SPR].y = 0;
+}
+
+void cursor_vbl_track(void) {
     uint8_t spread;
     uint8_t px;
     uint8_t py;
@@ -484,7 +511,7 @@ void cursor_vbl_update_oam(void) {
                FIXED_FRACTION(game_cursor->y) != 0) {
         spread = track(&game_cursor->y, game_cursor->target_y);
     } else {
-        goto update_ghost;
+        return;
     }
 
     px = FIXED_PIXEL(game_cursor->x);
@@ -493,11 +520,7 @@ void cursor_vbl_update_oam(void) {
     py = FIXED_PIXEL(game_cursor->y);
     if (FIXED_FRACTION(game_cursor->y) & 0x80u)
         py++;
-    draw_cursor(px, ((uint16_t)spread << 8) | py);
-
-update_ghost:
-    if (!game_action_busy)
-        update_ghost_oam();
-    else
-        HARDWARE_OAM[GHOST_SPR].y = 0;
+    cursor_draw_state.x = px;
+    cursor_draw_state.py_spread = ((uint16_t)spread << 8) | py;
+    cursor_draw_state.pending = 1;
 }

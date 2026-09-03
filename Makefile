@@ -215,17 +215,19 @@ endif
 GB_FLAMEGRAPH_DIR ?= ../gb-flamegraph
 GB_FLAMEGRAPH = node --stack-size=32768 \
 	$(GB_FLAMEGRAPH_DIR)/src/gb-flamegraph.js
-FLAMEGRAPH_DIR = build/flamegraph
-PROFILE_ROM    = build/profile/$(PROJECTNAME).gb
-FLAME_INPUT   ?= $(PROFILEDIR)/cursor_input.json
-FLAME_START   ?= 0
-FLAME_FRAMES  ?= 845
+FLAMEGRAPH_DIR  = build/flamegraph
+PROFILE_ROM     = build/profile/$(PROJECTNAME).gb
+VBLANK_ANALYZER = $(TOOLSDIR)/analyze_vblank.js
+FLAME_INPUT    ?= $(PROFILEDIR)/cursor_input.json
+FLAME_START    ?= 0
+FLAME_FRAMES   ?= 845
 
 flamegraph:
 	$(MAKE) BUILD=profile all
 	$(GB_FLAMEGRAPH) -r $(PROFILE_ROM) \
 		-i $(FLAME_INPUT) -s $(FLAME_START) -f $(FLAME_FRAMES) \
 		-c all -e $(FLAMEGRAPH_DIR)
+	node $(VBLANK_ANALYZER) $(FLAMEGRAPH_DIR)/speedscope.json
 	@echo Flamegraph written to $(FLAMEGRAPH_DIR)/
 	@echo Open $(FLAMEGRAPH_DIR)/index.html in a browser.
 
