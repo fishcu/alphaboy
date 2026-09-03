@@ -114,19 +114,20 @@ inline uint8_t flood_next_generation(void) {
         });                                                                    \
     }
 
-/* Returns 1 immediately on the first liberty found.  If it returns 0,
- * flood_deque[0..group_size-1] contains the fully traversed dead group. */
+/* Probe a group using a tentative suffix of flood_deque.  Returns 1 on the
+ * first liberty and leaves group_end unchanged.  If the group is dead,
+ * appends it permanently and advances group_end to the new deque end. */
 static uint8_t group_has_liberty(const game_t *g, uint16_t seed,
-                                 uint8_t stone_color, uint16_t *group_size) {
-    uint16_t head = 0;
-    uint16_t tail = 0;
+                                 uint8_t stone_color, uint16_t *group_end) {
+    uint16_t head = *group_end;
+    uint16_t tail = head;
     const uint8_t generation = flood_next_generation();
 
     flood_visited[seed] = generation;
     flood_deque[tail++] = seed;
 
     GROUP_HAS_LIBERTY_CORE();
-    *group_size = tail;
+    *group_end = tail;
     return 0;
 }
 
@@ -235,11 +236,8 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
     g->board[coord] = own_color;
 
     uint8_t move_hi = (uint8_t)((coord >> 8) | (color << (MOVE_COLOR_BIT - 8)));
-    uint8_t captured_total = 0;
-    uint8_t stream_pending = 0;
-    uint8_t prefix_committed = 0;
+    uint16_t capture_count = 0;
     uint8_t resolved_directions = 0;
-    uint16_t pending_single_capture = COORD_PASS;
 
     /* ---- Speculative animation prefix (uncommitted) ----
      * Pushed before captures so the FIFO drain shows cosmetic updates
@@ -276,55 +274,22 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
                 g->board[nb + DIR_DOWN] != COLOR_EMPTY &&
                 g->board[nb + DIR_LEFT] != COLOR_EMPTY &&
                 g->board[nb + DIR_RIGHT] != COLOR_EMPTY) {
-                uint16_t group_size;
-                if (group_has_liberty(g, nb, opp_color, &group_size)) {
-                    resolved_directions |= flood_reached_directions(coord);
-                } else {
+                const uint8_t has_liberty =
+                    group_has_liberty(g, nb, opp_color, &capture_count);
+                resolved_directions |= flood_reached_directions(coord);
+                if (!has_liberty)
                     move_hi |= dir_bit << (MOVE_CAP_SHIFT - 8);
-
-                    /*
-                     * Hold a lone first capture locally until ko detection.
-                     * A ko tile belongs in the immediate prefix and replaces
-                     * that capture's normal removal command.
-                     */
-                    if (captured_total == 0 && group_size == 1) {
-                        pending_single_capture = flood_deque[0];
-                        g->board[pending_single_capture] = COLOR_EMPTY;
-                        captured_total = 1;
-                    } else {
-                        if (!prefix_committed) {
-                            board_animation_end_frame();
-                            board_animation_commit();
-                            prefix_committed = 1;
-                        }
-
-                        if (captured_total == 1) {
-                            board_animation_stream_push(
-                                pending_single_capture,
-                                surface_tile(pending_single_capture),
-                                &stream_pending);
-                            pending_single_capture = COORD_PASS;
-                        }
-
-                        captured_total = 2;
-                        for (uint16_t i = 0; i < group_size; i++) {
-                            const uint16_t cap = flood_deque[i];
-                            g->board[cap] = COLOR_EMPTY;
-                            board_animation_stream_push(cap, surface_tile(cap),
-                                                        &stream_pending);
-                        }
-                    }
-                }
             }
         }
     });
 
     /* ---- Suicide check ---- */
 
-    if (captured_total == 0 && g->board[coord + DIR_UP] != COLOR_EMPTY &&
+    if (capture_count == 0 && g->board[coord + DIR_UP] != COLOR_EMPTY &&
         g->board[coord + DIR_DOWN] != COLOR_EMPTY &&
         g->board[coord + DIR_LEFT] != COLOR_EMPTY &&
         g->board[coord + DIR_RIGHT] != COLOR_EMPTY) {
+        nb = 0;
         if (!group_has_liberty(g, coord, own_color, &nb)) {
             board_animation_rewind();
             g->board[coord] = COLOR_EMPTY;
@@ -332,43 +297,33 @@ move_legality_t game_play_move(game_t *g, uint16_t coord, color_t color) {
         }
     }
 
-    /* Ko detection: exactly one single-stone group captured, the
-     * played stone is a lone stone, and it has exactly one liberty
-     * (the position where the captured stone was). */
+    /* A sole capture creates ko only when the new stone is isolated and
+     * the captured point will be its only liberty. */
     g->ko = COORD_PASS;
-    if (captured_total == 1) {
-        uint16_t ko = COORD_PASS;
-        uint8_t liberties = 0;
+    if (capture_count == 1) {
+        const uint16_t captured = flood_deque[0];
         FOR_EACH_NEIGHBOR(coord, nb, {
-            if (g->board[nb] == own_color)
+            if (g->board[nb] == own_color ||
+                (nb != captured && g->board[nb] == COLOR_EMPTY))
                 goto ko_done;
-            if (g->board[nb] == COLOR_EMPTY) {
-                ko = nb;
-                liberties++;
-                if (liberties > 1)
-                    goto ko_done;
-            }
         });
-        g->ko = ko;
+        g->ko = captured;
         move_hi |= (1 << (MOVE_KO_BIT - 8));
     }
 ko_done:;
 
-    if (!prefix_committed) {
-        if (g->ko != COORD_PASS) {
-            assert(g->ko == pending_single_capture &&
-                   "ko must be the sole captured coordinate");
-            board_animation_push(g->ko, ko_tile(g->ko));
-            pending_single_capture = COORD_PASS;
-        }
-        board_animation_end_frame();
-        board_animation_commit();
-    }
+    if (g->ko != COORD_PASS)
+        board_animation_push(g->ko, ko_tile(g->ko));
+    board_animation_end_frame();
+    board_animation_commit();
 
-    if (pending_single_capture != COORD_PASS) {
-        board_animation_stream_push(pending_single_capture,
-                                    surface_tile(pending_single_capture),
-                                    &stream_pending);
+    uint8_t stream_pending = 0;
+    for (uint16_t i = 0; i < capture_count; i++) {
+        const uint16_t cap = flood_deque[i];
+        g->board[cap] = COLOR_EMPTY;
+        if (cap != g->ko)
+            board_animation_stream_push(cap, surface_tile(cap),
+                                        &stream_pending);
     }
     board_animation_stream_flush(&stream_pending);
 
